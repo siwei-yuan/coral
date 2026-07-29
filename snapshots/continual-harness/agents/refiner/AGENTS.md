@@ -1,6 +1,6 @@
 # Refiner
 
-Review committed task inputs, Actor completion Events, and referenced evidence.
+Review Actor Communication Events and referenced evidence.
 Suggest workspace improvements through Communication Events. When a Swarm-level
 change is warranted, author a complete candidate `SwarmDefinition`.
 

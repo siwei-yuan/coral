@@ -1,6 +1,6 @@
 import { contentId, digest, immutable } from "../canonical.ts"
 import type { AgentRuntime, AgentTurnResult } from "../agent/runtime.ts"
-import type { EventDraft, Ledger, LedgerEvent, Scope } from "../ledger/ledger.ts"
+import type { EventDraft, Ledger, LedgerEvent } from "../ledger/ledger.ts"
 import { activeScope, forkScope } from "../ledger/ledger.ts"
 import type { PluginBinding, SwarmDefinition } from "./definition.ts"
 import { findAgent, projectAgentSwarmView, validateDefinition } from "./definition.ts"
@@ -12,12 +12,6 @@ import {
   proposalWorkspaceCommits,
   safeForkBindings,
 } from "./revision.ts"
-
-interface Selection {
-  proposalId: string
-  forkId: string
-  eventId: string
-}
 
 interface BootstrapInput {
   definition: SwarmDefinition
@@ -44,7 +38,6 @@ export class Swarm {
   #proposals = new Map<string, SwarmProposal>()
   #forks = new Map<string, MutableFork>()
   #candidates = new Map<string, SwarmRevision>()
-  #selections = new Map<string, Selection>()
   #agentHeads = new Map<string, string>()
   #activeRevisionId: string | null = null
   #mainOperations: Promise<unknown> = Promise.resolve()
@@ -71,7 +64,6 @@ export class Swarm {
       proposalId: null,
       selectedForkId: null,
       definition: checkedDefinition,
-      definitionDigest: digest(checkedDefinition),
       agentHeads: { ...agentHeads },
       workspaceCommits: Object.fromEntries(
         checkedDefinition.agents.map((agent) => [
@@ -84,8 +76,6 @@ export class Swarm {
           ],
         ]),
       ),
-      pluginBindings: checkedDefinition.plugins,
-      evaluationEventIds: [] as string[],
       ledgerFrontier: this.ledger.head().seq + 1,
     }
     const id = contentId("revision", body)
@@ -161,7 +151,7 @@ export class Swarm {
   pluginBindingForEgress(pluginId: string, event: LedgerEvent): PluginBinding {
     if (event.scope.kind !== "active") throw new Error("Fork Events cannot use live external egress")
     const revision = this.activeRevision()
-    const plugin = revision.pluginBindings.find((binding) => binding.id === pluginId)
+    const plugin = revision.definition.plugins.find((binding) => binding.id === pluginId)
     if (!plugin || plugin.mode !== "live") throw new Error(`Plugin is not live: ${pluginId}`)
     const channel = revision.definition.externalChannels.find((binding) => binding.plugin === pluginId)
     const agentId = event.actor.startsWith("agent/") ? event.actor.slice("agent/".length) : null
@@ -175,28 +165,63 @@ export class Swarm {
     return this.#withMain(() => this.#runAgentTurn(input))
   }
 
+  async dispatch(inputEventId: string): Promise<AgentTurnResult[]> {
+    return this.#withMain(() => this.#dispatch(inputEventId))
+  }
+
+  async #dispatch(inputEventId: string): Promise<AgentTurnResult[]> {
+    const input = this.ledger.get(inputEventId)
+    if (input.scope.kind !== "active") throw new Error("Main dispatch requires an active-scoped Event")
+    const queue = [input]
+    const turns: AgentTurnResult[] = []
+    while (queue.length > 0) {
+      const event = queue.shift()!
+      for (const agentId of communicationTargets(this.activeRevision().definition, event)) {
+        if (turns.length >= 100) throw new Error("Main exceeded 100 Agent deliveries")
+        const result = await this.#runAgentTurn({ agentId, inputEventId: event.id })
+        turns.push(result)
+        queue.push(...result.outputEvents)
+      }
+    }
+    return turns
+  }
+
   async #runAgentTurn({ agentId, inputEventId }: { agentId: string; inputEventId: string }): Promise<AgentTurnResult> {
     const revision = this.activeRevision()
     const agent = findAgent(revision.definition, agentId)
     const input = this.ledger.get(inputEventId)
     if (input.scope.kind !== "active") throw new Error("Agent turn input must be active-scoped")
+    if (input.type === "communication.sent" && !communicationTargets(revision.definition, input).includes(agentId)) {
+      throw new Error(`Communication is not addressed to Agent: ${agentId}`)
+    }
     const scope = activeScope()
     const result = await this.agentRuntime.runTurn({
       agent,
       baseCommit: this.agentHead(agentId),
       scope,
       inputEvents: [input],
+      workspaceHeads: Object.fromEntries(this.#agentHeads),
       runtimeContext: {
         swarm: projectAgentSwarmView(
           revision.definition,
           agentId,
           { kind: "revision", id: revision.id },
           scope,
-          revision.pluginBindings,
+          revision.definition.plugins,
         ),
       },
     })
     this.#agentHeads.set(agentId, result.revision.commit)
+    for (const event of result.outputEvents) {
+      if (event.type !== "swarm.revision.requested") continue
+      const request = revisionRequest(event.data)
+      await this.#propose({
+        authoredBy: agentId,
+        definition: request.definition,
+        addedAgentHeads: request.addedAgentHeads,
+        reasonEventIds: [event.id],
+      })
+    }
     return result
   }
 
@@ -255,8 +280,6 @@ export class Swarm {
         this.ledger.all(),
         base.proposalId ? this.proposal(base.proposalId).ledgerFrontier : base.ledgerFrontier,
       ),
-      pluginBindings: checkedDefinition.plugins,
-      testDigest: digest(checkedDefinition.tests),
       ledgerFrontier: this.ledger.head().seq + 1,
     }
     const id = contentId("proposal", body)
@@ -271,7 +294,7 @@ export class Swarm {
         proposalId: id,
         baseRevision: base.id,
         definitionDigest: digest(checkedDefinition),
-        testDigest: body.testDigest,
+        testDigest: digest(checkedDefinition.tests),
         agentHeads: body.agentHeads,
         workspaceCommits: body.workspaceCommits,
       },
@@ -292,7 +315,7 @@ export class Swarm {
       scope,
       causation: [source.eventId],
       swarmRevision: source.revisionId,
-      data: { forkId: id, sourceKind: source.kind, sourceId, testDigest: source.testDigest },
+      data: { forkId: id, sourceKind: source.kind, sourceId, testDigest: digest(source.definition.tests) },
     })
     const fork: MutableFork = {
       id,
@@ -300,7 +323,7 @@ export class Swarm {
       sourceId,
       definition: source.definition,
       agentHeads: { ...source.agentHeads },
-      pluginBindings: immutable(safeForkBindings(source.pluginBindings)),
+      pluginBindings: immutable(safeForkBindings(source.definition.plugins)),
       ledgerFrontier: source.ledgerFrontier,
       scope,
       status: "running",
@@ -322,7 +345,6 @@ export class Swarm {
     const results = []
 
     for (const test of fork.definition.tests) {
-      const startSeq = this.ledger.head().seq
       const inputs = test.inputEvents.map((input) =>
         this.ledger.append({
           type: input.type,
@@ -335,6 +357,7 @@ export class Swarm {
           data: input.data ?? null,
         }),
       )
+      const startSeq = this.ledger.head().seq
       await this.#drainFork(fork, inputs)
       const matching = this.ledger
         .inScope(fork.scope)
@@ -365,43 +388,38 @@ export class Swarm {
     return snapshotFork(fork)
   }
 
-  selectFork({ proposalId, forkId, selectedBy }: { proposalId: string; forkId: string; selectedBy: string }): Selection {
+  freezeCandidate({
+    proposalId,
+    forkId,
+    selectedBy,
+  }: {
+    proposalId: string
+    forkId: string
+    selectedBy: string
+  }): SwarmRevision {
+    const proposal = this.proposal(proposalId)
     const fork = this.#mutableFork(forkId)
     if (fork.sourceKind !== "proposal" || fork.sourceId !== proposalId) {
       throw new Error("Only a Proposal Fork can be selected for a Candidate")
     }
     if (fork.status !== "completed") throw new Error("Fork must be evaluated before selection")
-    if (this.#selections.has(proposalId)) throw new Error("Proposal already has a selected Fork")
-    const event = this.ledger.append({
+    const selected = this.ledger.append({
       type: "swarm.fork.selected",
       actor: selectedBy,
       scope: activeScope(),
       causation: [fork.evaluationEventId!],
       data: { proposalId, forkId },
     })
-    const selection = immutable({ proposalId, forkId, eventId: event.id })
-    this.#selections.set(proposalId, selection)
-    return selection
-  }
-
-  freezeCandidate(proposalId: string): SwarmRevision {
-    const proposal = this.proposal(proposalId)
-    const selection = this.#selections.get(proposalId)
-    if (!selection) throw new Error("Select an evaluated Fork before freezing a Candidate")
-    const fork = this.#mutableFork(selection.forkId)
     const body = {
       parentRevision: proposal.baseRevision,
       proposalId,
       selectedForkId: fork.id,
       definition: proposal.definition,
-      definitionDigest: digest(proposal.definition),
       agentHeads: { ...fork.agentHeads },
       workspaceCommits: mergeWorkspaceCommits(
         proposal.workspaceCommits,
         collectWorkspaceCommits(this.ledger.all(), proposal.ledgerFrontier, fork.scope),
       ),
-      pluginBindings: proposal.pluginBindings,
-      evaluationEventIds: [fork.evaluationEventId!],
       ledgerFrontier: this.ledger.head().seq + 1,
     }
     const id = contentId("revision", body)
@@ -409,13 +427,13 @@ export class Swarm {
       type: "swarm.revision.frozen",
       actor: "swarm/runtime",
       scope: activeScope(),
-      causation: [selection.eventId],
+      causation: [selected.id],
       swarmRevision: proposal.baseRevision,
       data: {
         candidateRevisionId: id,
         proposalId,
         selectedForkId: fork.id,
-        definitionDigest: body.definitionDigest,
+        definitionDigest: digest(proposal.definition),
         agentHeads: fork.agentHeads,
         workspaceCommits: body.workspaceCommits,
       },
@@ -511,7 +529,6 @@ export class Swarm {
         revisionId: candidate.id,
         promotedForkId: selectedFork.id,
         workspaceHeads: nextHeads,
-        reappliedCommits,
         removedAgentHeads,
       },
     })
@@ -544,16 +561,16 @@ export class Swarm {
     let deliveries = 0
     while (queue.length > 0) {
       const event = queue.shift()!
-      const routes = fork.definition.routes.filter((route) => route.on === event.type)
-      for (const route of routes) {
+      for (const agentId of communicationTargets(fork.definition, event)) {
         deliveries += 1
         if (deliveries > 100) throw new Error("Fork exceeded 100 Agent deliveries")
-        const agent = findAgent(fork.definition, route.to)
+        const agent = findAgent(fork.definition, agentId)
         const result = await this.agentRuntime.runTurn({
           agent,
           baseCommit: fork.agentHeads[agent.id]!,
           scope: fork.scope,
           inputEvents: [event],
+          workspaceHeads: { ...fork.agentHeads },
           runtimeContext: {
             swarm: projectAgentSwarmView(
               fork.definition,
@@ -566,8 +583,6 @@ export class Swarm {
         })
         fork.agentHeads[agent.id] = result.revision.commit
         queue.push(...result.outputEvents)
-        if (result.workspaceEvent) queue.push(result.workspaceEvent)
-        queue.push(result.turnEvent)
       }
     }
   }
@@ -587,8 +602,6 @@ export class Swarm {
         revisionId: proposal.baseRevision,
         definition: proposal.definition,
         agentHeads: proposal.agentHeads,
-        pluginBindings: proposal.pluginBindings,
-        testDigest: proposal.testDigest,
         ledgerFrontier: proposal.ledgerFrontier,
       }
     }
@@ -600,8 +613,6 @@ export class Swarm {
         revisionId: revision.id,
         definition: revision.definition,
         agentHeads: revision.agentHeads,
-        pluginBindings: revision.pluginBindings,
-        testDigest: digest(revision.definition.tests),
         ledgerFrontier: revision.ledgerFrontier,
       }
     }
@@ -644,4 +655,38 @@ function isPluginCommunication(data: unknown): data is { source: { plugin: strin
   if (!data || typeof data !== "object") return false
   const candidate = data as { source?: { plugin?: unknown }; to?: unknown }
   return typeof candidate.source?.plugin === "string"
+}
+
+function communicationTargets(definition: SwarmDefinition, event: LedgerEvent): string[] {
+  if (event.type !== "communication.sent") return []
+  if (!event.data || typeof event.data !== "object") throw new Error("Communication data is required")
+  const data = event.data as { from?: unknown; to?: unknown }
+  if (!Array.isArray(data.to)) throw new Error("Communication recipients are required")
+  const targets = [...new Set(data.to.filter((recipient): recipient is string => typeof recipient === "string"))]
+    .filter((recipient) => recipient.startsWith("agent/"))
+    .map((recipient) => recipient.slice("agent/".length))
+  for (const target of targets) findAgent(definition, target)
+
+  if (event.actor.startsWith("agent/")) {
+    const sender = event.actor.slice("agent/".length)
+    if (data.from !== event.actor) throw new Error("Communication sender must match its Agent actor")
+    for (const target of targets) {
+      if (!definition.routes.some((route) => route.from === sender && route.to === target)) {
+        throw new Error(`Communication route is not defined: ${sender} -> ${target}`)
+      }
+    }
+  }
+  return targets
+}
+
+function revisionRequest(data: unknown): { definition: SwarmDefinition; addedAgentHeads: Record<string, string> } {
+  if (!data || typeof data !== "object") throw new Error("Swarm revision request data is required")
+  const request = data as { definition?: unknown; addedAgentHeads?: unknown }
+  if (request.addedAgentHeads !== undefined && (!request.addedAgentHeads || typeof request.addedAgentHeads !== "object")) {
+    throw new Error("Swarm revision request addedAgentHeads must be an object")
+  }
+  return {
+    definition: validateDefinition(request.definition),
+    addedAgentHeads: (request.addedAgentHeads ?? {}) as Record<string, string>,
+  }
 }

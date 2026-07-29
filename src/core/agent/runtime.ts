@@ -17,6 +17,7 @@ export interface AgentTurnInput {
   scope: Scope
   inputEvents: LedgerEvent[]
   runtimeContext?: Record<string, unknown>
+  workspaceHeads?: Record<string, string>
 }
 
 export interface AgentTurnResult {
@@ -91,7 +92,14 @@ export class AgentRuntime {
     await this.workspaces.retain(agentId, key, commit)
   }
 
-  async runTurn({ agent, baseCommit, scope, inputEvents, runtimeContext = {} }: AgentTurnInput): Promise<AgentTurnResult> {
+  async runTurn({
+    agent,
+    baseCommit,
+    scope,
+    inputEvents,
+    runtimeContext = {},
+    workspaceHeads = {},
+  }: AgentTurnInput): Promise<AgentTurnResult> {
     const adapter = this.adapters.get(agent.harness)
     if (!adapter) throw new Error(`Harness Adapter is not registered: ${agent.harness}`)
     if (inputEvents.length === 0) throw new Error("Agent turn requires at least one input Event")
@@ -120,9 +128,16 @@ export class AgentRuntime {
           workingDirectory: checkout.worktree,
           inputEvents,
           context,
+          readWorkspace: (agentId, path) => {
+            const commit = workspaceHeads[agentId]
+            if (!commit) throw new Error(`Agent workspace is not visible: ${agentId}`)
+            return this.workspaces.read(agentId, commit, path)
+          },
         })
         outcome = result.outcome ?? "completed"
-        emissions = result.events ?? []
+        const nextEmissions = result.events ?? []
+        for (const emission of nextEmissions) assertAgentEmission(emission)
+        emissions = nextEmissions
         trajectory = result.trajectory ?? null
       } catch (error) {
         failure = error instanceof Error ? error.message : String(error)
@@ -189,5 +204,11 @@ export class AgentRuntime {
       const data = event.data as { agentId?: unknown; commit?: unknown }
       return data.agentId === agentId && data.commit === commit
     })
+  }
+}
+
+function assertAgentEmission(emission: HarnessEmission): void {
+  if (emission.type !== "communication.sent" && emission.type !== "swarm.revision.requested") {
+    throw new Error(`Agent may only emit Communication or Swarm evolution Events: ${emission.type}`)
   }
 }

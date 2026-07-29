@@ -2,7 +2,8 @@
 
 This is a deliberately small Corallum Actor–Refiner blueprint:
 
-- Actor receives `task.requested` and emits `task.completed`.
+- Actor receives and emits `communication.sent`; the Swarm routes Actor messages
+  to Refiner through the Definition.
 - Refiner reviews the high-level outcome and proposes improvements.
 - Actor and Refiner own separate workspaces.
 - Their responsibilities and initial context live in those workspaces.

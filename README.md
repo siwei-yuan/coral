@@ -64,6 +64,11 @@ A workspace commit immediately becomes that Agent instance's next state. It
 never creates a Proposal implicitly. Workspace storage does not know about
 Swarm Forks; a Fork merely starts with a set of Agent commit IDs.
 
+Ordinary Agent collaboration uses only `communication.sent`. The active
+Definition declares allowed Agent-to-Agent edges; Main and Forks validate those
+edges and deliver each message to its recipients. Agents see the current Agent
+set and communication graph in their runtime Swarm view.
+
 A Revision is a point-in-time snapshot, not a second running Swarm and not a
 barrier around later workspace work. Main and Forks run; Revisions only record
 state. If Main Agents commit after a Proposal was created, those commits are
@@ -73,6 +78,10 @@ Adding or removing an Agent is a complete `SwarmDefinition` Proposal. Every
 workspace begins with a Framework-created, Ledger-backed root commit, and a new
 Agent must provide that initial commit. Removing an Agent removes it
 from the new Definition and heads but never deletes its Git or Ledger history.
+
+An Agent may emit `swarm.revision.requested` with a complete Definition. After
+that turn's workspace commit is recorded, Main turns it into the immutable
+Proposal that enters the normal Fork, evaluation, and Human-gated lifecycle.
 
 See [docs/DESIGN.md](docs/DESIGN.md).
 

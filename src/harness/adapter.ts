@@ -21,6 +21,7 @@ export interface HarnessInput {
   workingDirectory: string
   inputEvents: LedgerEvent[]
   context: ContextMessage[]
+  readWorkspace(agentId: string, path: string): Promise<string>
 }
 
 export interface HarnessAdapter {

@@ -13,11 +13,8 @@ export interface SwarmRevision {
   proposalId: string | null
   selectedForkId: string | null
   definition: SwarmDefinition
-  definitionDigest: string
   agentHeads: Record<string, string>
   workspaceCommits: Record<string, WorkspaceCommitRef[]>
-  pluginBindings: PluginBinding[]
-  evaluationEventIds: string[]
   ledgerFrontier: number
   frozenEventId: string
 }
@@ -30,8 +27,6 @@ export interface SwarmProposal {
   definition: SwarmDefinition
   agentHeads: Record<string, string>
   workspaceCommits: Record<string, WorkspaceCommitRef[]>
-  pluginBindings: PluginBinding[]
-  testDigest: string
   ledgerFrontier: number
   eventId: string
 }
@@ -66,8 +61,6 @@ export interface ForkSource {
   revisionId: string
   definition: SwarmDefinition
   agentHeads: Record<string, string>
-  pluginBindings: PluginBinding[]
-  testDigest: string
   ledgerFrontier: number
 }
 

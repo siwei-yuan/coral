@@ -10,14 +10,23 @@ test("a Proposal may add an Agent only with an initialized workspace", async (t)
   )
   const proposed = structuredClone(definition)
   proposed.agents.push({ id: "auditor", harness: "scripted" })
-  proposed.routes.push({ on: "audit.requested", to: "auditor" })
+  proposed.routes.push({ from: "builder", to: "auditor" })
   proposed.tests.push({
     id: "auditor-runs",
-    inputEvents: [{ type: "audit.requested", data: { task: "audit this result" } }],
-    expect: { eventType: "work.completed" },
+    inputEvents: [
+      {
+        type: "communication.sent",
+        data: {
+          from: "test/auditor-runs",
+          to: ["agent/auditor"],
+          content: [{ type: "text", text: "audit this result" }],
+        },
+      },
+    ],
+    expect: { eventType: "communication.sent" },
   })
   const reason = swarm.appendInput({
-    type: "evolution.requested",
+    type: "swarm.evolution.requested",
     actor: "external/user",
     data: { goal: "add an auditor" },
   })
@@ -45,13 +54,16 @@ test("a Proposal may add an Agent only with an initialized workspace", async (t)
   assert.ok(auditorRun)
   const swarmContext = builderRun.context.find((message) => message.content.startsWith("# Current Swarm"))
   assert.ok(swarmContext)
-  assert.match(swarmContext.content, /auditor: receives audit\.requested/)
+  assert.match(swarmContext.content, /auditor: receives from builder/)
   assert.doesNotMatch(swarmContext.content, /core-behavior|chat-v1/)
-  assert.match(contextText(auditorRun), /auditor \(you\): receives audit\.requested/)
+  assert.match(contextText(auditorRun), /auditor \(you\): receives from builder/)
   assert.equal(result.results?.every((testResult) => testResult.passed), true)
 
-  swarm.selectFork({ proposalId: proposal.id, forkId: fork.id, selectedBy: "agent/builder" })
-  const candidate = swarm.freezeCandidate(proposal.id)
+  const candidate = swarm.freezeCandidate({
+    proposalId: proposal.id,
+    forkId: fork.id,
+    selectedBy: "agent/builder",
+  })
   await swarm.approveAndActivate(candidate.id, "owner")
   assert.equal(swarm.activeRevision().definition.agents.some((agent) => agent.id === "auditor"), true)
   assert.equal(swarm.agentHead("auditor"), candidate.agentHeads.auditor)
@@ -60,13 +72,13 @@ test("a Proposal may add an Agent only with an initialized workspace", async (t)
 test("a Proposal may remove an Agent without deleting its auditable history", async (t) => {
   const { swarm, adapter, definition, revision } = await createFixture(t)
   const improvement = swarm.appendInput({
-    type: "improvement.requested",
+    type: "agent.workspace.improvement.requested",
     actor: "external/user",
     data: { request: "improve reviewer before removal" },
   })
   await swarm.runAgentTurn({ agentId: "reviewer", inputEventId: improvement.id })
   const reason = swarm.appendInput({
-    type: "evolution.requested",
+    type: "swarm.evolution.requested",
     actor: "external/user",
     data: { goal: "remove the reviewer" },
   })
@@ -75,11 +87,11 @@ test("a Proposal may remove an Agent without deleting its auditable history", as
   invalid.agents = invalid.agents.filter((agent) => agent.id !== "reviewer")
   await assert.rejects(
     swarm.propose({ authoredBy: "builder", definition: invalid, reasonEventIds: [reason.id] }),
-    /existing Agent/,
+    /existing sender and receiver Agents/,
   )
 
   const proposed = structuredClone(invalid)
-  proposed.routes = proposed.routes.filter((route) => route.to !== "reviewer")
+  proposed.routes = proposed.routes.filter((route) => route.from !== "reviewer" && route.to !== "reviewer")
   const proposal = await swarm.propose({
     authoredBy: "builder",
     definition: proposed,
@@ -95,8 +107,11 @@ test("a Proposal may remove an Agent without deleting its auditable history", as
   assert.ok(builderRun)
   assert.doesNotMatch(contextText(builderRun), /reviewer/)
 
-  swarm.selectFork({ proposalId: proposal.id, forkId: fork.id, selectedBy: "agent/builder" })
-  const candidate = swarm.freezeCandidate(proposal.id)
+  const candidate = swarm.freezeCandidate({
+    proposalId: proposal.id,
+    forkId: fork.id,
+    selectedBy: "agent/builder",
+  })
   assert.equal(candidate.agentHeads.reviewer, undefined)
   assert.equal(candidate.workspaceCommits.reviewer?.length, 1)
   await swarm.approveAndActivate(candidate.id, "owner")
@@ -106,6 +121,6 @@ test("a Proposal may remove an Agent without deleting its auditable history", as
   await swarm.runFork(historical.id)
   const historicalBuilder = adapter.runs.slice(historicalStart).find((run) => run.agentId === "builder")
   assert.ok(historicalBuilder)
-  assert.match(contextText(historicalBuilder), /reviewer: receives review\.requested/)
+  assert.match(contextText(historicalBuilder), /builder \(you\): receives from nobody; sends to reviewer/)
   assert.equal(result.results?.[0]?.passed, true)
 })

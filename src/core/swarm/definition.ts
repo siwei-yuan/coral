@@ -3,7 +3,7 @@ import type { AgentDefinition } from "../agent/definition.ts"
 import type { Scope } from "../ledger/ledger.ts"
 
 export interface Route {
-  on: string
+  from: string
   to: string
 }
 
@@ -42,9 +42,10 @@ export interface AgentSwarmView {
     id: string
     self: boolean
     receives: string[]
+    sendsTo: string[]
     externalFacing: boolean
   }>
-  routes: Array<{ event: string; to: string }>
+  routes: Route[]
   plugins: Array<{ id: string; mode: string }>
 }
 
@@ -65,7 +66,9 @@ export function validateDefinition(definition: unknown): SwarmDefinition {
     ids.add(agent.id)
   }
   for (const route of copy.routes) {
-    if (!route.on || !ids.has(route.to)) throw new Error("Every route requires an Event type and existing Agent")
+    if (!ids.has(route.from) || !ids.has(route.to)) {
+      throw new Error("Every communication route requires existing sender and receiver Agents")
+    }
   }
   for (const channel of copy.externalChannels) {
     if (!channel.plugin || !ids.has(channel.ingressTo)) {
@@ -105,12 +108,13 @@ export function projectAgentSwarmView(
     agents: definition.agents.map((agent) => ({
       id: agent.id,
       self: agent.id === self,
-      receives: definition.routes.filter((route) => route.to === agent.id).map((route) => route.on),
+      receives: definition.routes.filter((route) => route.to === agent.id).map((route) => route.from),
+      sendsTo: definition.routes.filter((route) => route.from === agent.id).map((route) => route.to),
       externalFacing: definition.externalChannels.some(
         (channel) => channel.ingressTo === agent.id || channel.egressFrom.includes(agent.id),
       ),
     })),
-    routes: definition.routes.map((route) => ({ event: route.on, to: route.to })),
+    routes: definition.routes,
     plugins: pluginBindings.map((plugin) => ({ id: plugin.id, mode: plugin.mode })),
   })
 }

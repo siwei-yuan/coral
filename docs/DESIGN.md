@@ -37,8 +37,9 @@ messages. The Workspace Bridge supplies the current turn facts and a helper for
 reading workspace files, then passes the result to the Harness Adapter. The
 Bridge owns only this stable mechanism; the Agent owns the composition policy.
 
-The Ledger is a high-level causal spine. It records Communication, one Event per
-logical Agent turn, workspace commits, and Swarm evolution. Native tool calls,
+The Ledger is a high-level causal spine. Ordinary collaboration is represented
+only by `communication.sent`; the other Core Events record logical Agent turns,
+workspace changes, and Swarm evolution. Native tool calls,
 reasoning, file reads, model tokens, queue state, and Plugin transport details
 remain in their native operational stores.
 
@@ -55,16 +56,17 @@ snapshots
 ```
 
 Workspace never imports Swarm. Agent Runtime knows no Proposal, Revision, or
-Fork semantics. Swarm never performs Git operations directly. Harness Adapters
-receive already-composed context and do not decide which workspace files to
-include.
+Fork state machine. Swarm never performs Git operations directly. Harness
+Adapters receive already-composed context plus a read-only function for exact
+Agent workspace snapshots; context composition remains owned by the Agent.
 
 ## Workspace ownership
 
 An Agent writes its own workspace. A commit immediately becomes that Agent
 instance's next state, including changes to `context.ts`; no Proposal, Human
-Decision, or activation is involved. It may read an explicit snapshot of
-another Agent's workspace and suggest changes through Communication Events.
+Decision, or activation is involved. During a turn it may read an exact,
+read-only head of another current Agent's workspace and send suggestions using
+`communication.sent`; it cannot write that workspace.
 The Workspace store only knows Git commits and worktrees. It has no Swarm,
 Revision, Proposal, or Fork abstraction.
 
@@ -83,6 +85,11 @@ evidence represented by the snapshot; it does not gate ordinary workspace
 changes or own later commits.
 
 `SwarmDefinition` is the Agent graph; there is no second `GraphRevision` type.
+Each Route is an allowed directed communication edge between two Agents. An
+Agent emits `communication.sent` with recipients; Swarm validates each internal
+recipient against the active edge and performs delivery. Main and Forks use the
+same rule. Arbitrary application Event types are not part of this Core graph.
+
 Adding or removing an Agent means proposing another complete Definition:
 
 - A new Agent must have an independently initialized workspace commit and an
@@ -126,6 +133,8 @@ Git and the Ledger but are not part of the new Main.
 An Agent may author a modified complete `SwarmDefinition`, including Agent
 composition, Harness bindings, routes, tests, and Plugin bindings. This is
 proposal authority, never authority to mutate the active Definition in place.
+It emits `swarm.revision.requested`; after its turn and workspace commit finish,
+Main creates the Proposal with that request Event as its cause.
 
 An Agent changes its own responsibility, context, memory, skills, or context
 composition by editing its workspace. The resulting commit affects its next
@@ -137,7 +146,7 @@ workspace meaning.
 
 Before every turn, Swarm projects the source Definition into an
 `AgentSwarmView` containing the Agent's own ID, all Agent IDs, their routed
-Event types, Routes, external-facing status, Plugin IDs/modes, source
+senders and recipients, Routes, external-facing status, Plugin IDs/modes, source
 Revision/Proposal, and active/Fork scope. Proposal Forks therefore see the
 proposed topology; historical Revision Forks see the historical topology.
 

@@ -10,10 +10,11 @@ export default async function compose({ read, inputEvents, swarm }) {
 function renderSwarm(swarm) {
   const agents = swarm.agents.map((agent) => {
     const label = agent.self ? `${agent.id} (you)` : agent.id
-    const receives = agent.receives.length > 0 ? agent.receives.join(", ") : "no routed Events"
-    return `- ${label}: receives ${receives}${agent.externalFacing ? "; external-facing" : ""}`
+    const receives = agent.receives.length > 0 ? agent.receives.join(", ") : "nobody"
+    const sendsTo = agent.sendsTo.length > 0 ? agent.sendsTo.join(", ") : "nobody"
+    return `- ${label}: receives from ${receives}; sends to ${sendsTo}${agent.externalFacing ? "; external-facing" : ""}`
   })
-  const routes = swarm.routes.map((route) => `- ${route.event} -> ${route.to}`)
+  const routes = swarm.routes.map((route) => `- ${route.from} -> ${route.to}`)
   const plugins = swarm.plugins.map((plugin) => `- ${plugin.id} (${plugin.mode})`)
   return [
     "# Current Swarm",
