@@ -1,11 +1,11 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { ChatPlugin, forkScope } from "../src/index.js"
-import { createFixture } from "../test-support/fixture.js"
+import { ChatPlugin, forkScope } from "../src/index.ts"
+import { createFixture } from "../test-support/fixture.ts"
 
 test("Chat is a transport Plugin over Communication Events and only active speaker can egress", async (t) => {
   const { swarm, ledger } = await createFixture(t)
-  const sent = []
+  const sent: unknown[] = []
   const chat = new ChatPlugin({ send: async (message) => sent.push(message) })
 
   const inbound = swarm.ingest(
@@ -17,7 +17,7 @@ test("Chat is a transport Plugin over Communication Events and only active speak
     }),
   )
   assert.equal(inbound.type, "communication.sent")
-  assert.deepEqual(inbound.data.to, ["agent/builder"])
+  assert.deepEqual((inbound.data as { to: string[] }).to, ["agent/builder"])
 
   const outbound = ledger.append({
     type: "communication.sent",

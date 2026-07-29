@@ -1,21 +1,62 @@
-import { contentId, digest, immutable } from "./canonical.js"
-import { activeScope, forkScope } from "./ledger.js"
+import { contentId, digest, immutable } from "../canonical.ts"
+import type { AgentRuntime, AgentTurnResult } from "../agent/runtime.ts"
+import type { EventDraft, Ledger, LedgerEvent, Scope } from "../ledger/ledger.ts"
+import { activeScope, forkScope } from "../ledger/ledger.ts"
+import type { PluginBinding, SwarmDefinition } from "./definition.ts"
+import { findAgent, projectAgentSwarmView, validateDefinition } from "./definition.ts"
+import type { ForkSnapshot, ForkSource, MutableFork, SwarmProposal, SwarmRevision } from "./revision.ts"
+import {
+  assertCompleteHeads,
+  collectWorkspaceCommits,
+  mergeWorkspaceCommits,
+  proposalWorkspaceCommits,
+  safeForkBindings,
+} from "./revision.ts"
+
+interface Selection {
+  proposalId: string
+  forkId: string
+  eventId: string
+}
+
+interface BootstrapInput {
+  definition: SwarmDefinition
+  agentHeads: Record<string, string>
+  human: string
+}
+
+interface ProposalInput {
+  authoredBy: string
+  definition?: SwarmDefinition
+  agentHeads?: Record<string, string>
+  reasonEventIds: string[]
+}
+
+interface AppendInput {
+  type: string
+  actor: string
+  data?: unknown
+  schema?: string
+}
 
 export class Swarm {
-  #revisions = new Map()
-  #proposals = new Map()
-  #forks = new Map()
-  #candidates = new Map()
-  #selections = new Map()
-  #agentHeads = new Map()
-  #activeRevisionId = null
+  #revisions = new Map<string, SwarmRevision>()
+  #proposals = new Map<string, SwarmProposal>()
+  #forks = new Map<string, MutableFork>()
+  #candidates = new Map<string, SwarmRevision>()
+  #selections = new Map<string, Selection>()
+  #agentHeads = new Map<string, string>()
+  #activeRevisionId: string | null = null
 
-  constructor({ ledger, agentRuntime }) {
+  readonly ledger: Ledger
+  readonly agentRuntime: AgentRuntime
+
+  constructor({ ledger, agentRuntime }: { ledger: Ledger; agentRuntime: AgentRuntime }) {
     this.ledger = ledger
     this.agentRuntime = agentRuntime
   }
 
-  bootstrap({ definition, agentHeads, human }) {
+  bootstrap({ definition, agentHeads, human }: BootstrapInput): SwarmRevision {
     if (this.#activeRevisionId) throw new Error("Swarm is already bootstrapped")
     assertHuman(human)
     const checkedDefinition = validateDefinition(definition)
@@ -29,58 +70,58 @@ export class Swarm {
       definitionDigest: digest(checkedDefinition),
       agentHeads: { ...agentHeads },
       workspaceCommits: Object.fromEntries(
-        checkedDefinition.agents.map((agent) => [agent.id, [{ commit: agentHeads[agent.id], eventId: null }]]),
+        checkedDefinition.agents.map((agent) => [agent.id, [{ commit: agentHeads[agent.id]!, eventId: null }]]),
       ),
       pluginBindings: checkedDefinition.plugins,
-      evaluationEventIds: [],
+      evaluationEventIds: [] as string[],
       ledgerFrontier: this.ledger.head().seq + 1,
     }
-    const revision = immutable({ id: contentId("revision", body), ...body })
+    const id = contentId("revision", body)
     const frozen = this.ledger.append({
       type: "swarm.revision.frozen",
       actor: `human/${human}`,
       scope: activeScope(),
-      data: { revisionId: revision.id, bootstrap: true },
+      data: { revisionId: id, bootstrap: true },
     })
     const decision = this.ledger.append({
       type: "swarm.decision.recorded",
       actor: `human/${human}`,
       scope: activeScope(),
       causation: [frozen.id],
-      data: { candidateRevisionId: revision.id, verdict: "approved" },
+      data: { candidateRevisionId: id, verdict: "approved" },
     })
     this.ledger.append({
       type: "swarm.revision.activated",
       actor: "swarm/runtime",
       scope: activeScope(),
       causation: [decision.id],
-      swarmRevision: revision.id,
-      data: { previousRevisionId: null, revisionId: revision.id },
+      swarmRevision: id,
+      data: { previousRevisionId: null, revisionId: id },
     })
 
-    const stored = immutable({ ...revision, frozenEventId: frozen.id })
-    this.#revisions.set(stored.id, stored)
-    this.#activeRevisionId = revision.id
+    const revision = immutable<SwarmRevision>({ id, ...body, frozenEventId: frozen.id })
+    this.#revisions.set(id, revision)
+    this.#activeRevisionId = id
     for (const [agentId, head] of Object.entries(agentHeads)) this.#agentHeads.set(agentId, head)
-    return stored
+    return revision
   }
 
-  activeRevision() {
+  activeRevision(): SwarmRevision {
     if (!this.#activeRevisionId) throw new Error("Swarm is not bootstrapped")
-    return this.#revisions.get(this.#activeRevisionId)
+    return this.#revisions.get(this.#activeRevisionId)!
   }
 
-  agentHead(agentId) {
+  agentHead(agentId: string): string {
     const head = this.#agentHeads.get(agentId)
     if (!head) throw new Error(`unknown Agent workspace: ${agentId}`)
     return head
   }
 
-  appendInput({ type, actor, data, schema }) {
+  appendInput({ type, actor, data, schema }: AppendInput): LedgerEvent {
     const revision = this.activeRevision()
     return this.ledger.append({
       type,
-      schema,
+      ...(schema ? { schema } : {}),
       actor,
       scope: activeScope(),
       swarmRevision: revision.id,
@@ -88,19 +129,24 @@ export class Swarm {
     })
   }
 
-  ingest(draft) {
+  ingest(draft: EventDraft): LedgerEvent {
     let data = structuredClone(draft.data ?? null)
-    if (draft.type === "communication.sent" && data?.source?.plugin) {
+    if (draft.type === "communication.sent" && isPluginCommunication(data)) {
       const channel = this.activeRevision().definition.externalChannels.find(
         (binding) => binding.plugin === data.source.plugin,
       )
       if (!channel) throw new Error(`No external channel for Plugin: ${data.source.plugin}`)
       if (!Array.isArray(data.to) || data.to.length === 0) data.to = [`agent/${channel.ingressTo}`]
     }
-    return this.appendInput({ ...draft, data })
+    return this.appendInput({
+      type: draft.type,
+      ...(draft.schema ? { schema: draft.schema } : {}),
+      actor: draft.actor,
+      data,
+    })
   }
 
-  pluginBindingForEgress(pluginId, event) {
+  pluginBindingForEgress(pluginId: string, event: LedgerEvent): PluginBinding {
     if (event.scope.kind !== "active") throw new Error("Fork Events cannot use live external egress")
     const revision = this.activeRevision()
     const plugin = revision.pluginBindings.find((binding) => binding.id === pluginId)
@@ -113,22 +159,32 @@ export class Swarm {
     return plugin
   }
 
-  async runAgentTurn({ agentId, inputEventId }) {
+  async runAgentTurn({ agentId, inputEventId }: { agentId: string; inputEventId: string }): Promise<AgentTurnResult> {
     const revision = this.activeRevision()
     const agent = findAgent(revision.definition, agentId)
     const input = this.ledger.get(inputEventId)
     if (input.scope.kind !== "active") throw new Error("Agent turn input must be active-scoped")
+    const scope = activeScope()
     const result = await this.agentRuntime.runTurn({
       agent,
       baseCommit: this.agentHead(agentId),
-      scope: activeScope(),
+      scope,
       inputEvents: [input],
+      runtimeContext: {
+        swarm: projectAgentSwarmView(
+          revision.definition,
+          agentId,
+          { kind: "revision", id: revision.id },
+          scope,
+          revision.pluginBindings,
+        ),
+      },
     })
     this.#agentHeads.set(agentId, result.revision.commit)
     return result
   }
 
-  propose({ authoredBy, definition = this.activeRevision().definition, agentHeads, reasonEventIds }) {
+  propose({ authoredBy, definition = this.activeRevision().definition, agentHeads, reasonEventIds }: ProposalInput): SwarmProposal {
     const base = this.activeRevision()
     findAgent(base.definition, authoredBy)
     if (!Array.isArray(reasonEventIds) || reasonEventIds.length === 0) {
@@ -151,18 +207,13 @@ export class Swarm {
       reasonEventIds: [...reasonEventIds],
       definition: checkedDefinition,
       agentHeads: { ...heads },
-      workspaceCommits: collectWorkspaceCommits(
-        this.ledger.all(),
-        base.ledgerFrontier,
-        activeScope(),
-        checkedDefinition,
-      ),
+      workspaceCommits: proposalWorkspaceCommits(base, checkedDefinition, heads, this.ledger.all()),
       pluginBindings: checkedDefinition.plugins,
       testDigest: digest(checkedDefinition.tests),
       ledgerFrontier: this.ledger.head().seq + 1,
     }
-    const proposal = immutable({ id: contentId("proposal", body), ...body })
-    if (this.#proposals.has(proposal.id)) throw new Error(`Proposal already exists: ${proposal.id}`)
+    const id = contentId("proposal", body)
+    if (this.#proposals.has(id)) throw new Error(`Proposal already exists: ${id}`)
     const event = this.ledger.append({
       type: "swarm.revision.proposed",
       actor: `agent/${authoredBy}`,
@@ -170,20 +221,20 @@ export class Swarm {
       causation: reasonEventIds,
       swarmRevision: base.id,
       data: {
-        proposalId: proposal.id,
+        proposalId: id,
         baseRevision: base.id,
         definitionDigest: digest(checkedDefinition),
-        testDigest: proposal.testDigest,
-        agentHeads: proposal.agentHeads,
-        workspaceCommits: proposal.workspaceCommits,
+        testDigest: body.testDigest,
+        agentHeads: body.agentHeads,
+        workspaceCommits: body.workspaceCommits,
       },
     })
-    const stored = immutable({ ...proposal, eventId: event.id })
-    this.#proposals.set(stored.id, stored)
-    return stored
+    const proposal = immutable<SwarmProposal>({ id, ...body, eventId: event.id })
+    this.#proposals.set(id, proposal)
+    return proposal
   }
 
-  createFork(sourceId) {
+  createFork(sourceId: string): ForkSnapshot {
     const source = this.#forkSource(sourceId)
     const ordinal = [...this.#forks.values()].filter((fork) => fork.sourceId === sourceId).length + 1
     const id = contentId("fork", { sourceId, ordinal })
@@ -196,13 +247,13 @@ export class Swarm {
       swarmRevision: source.revisionId,
       data: { forkId: id, sourceKind: source.kind, sourceId, testDigest: source.testDigest },
     })
-    const fork = {
+    const fork: MutableFork = {
       id,
       sourceKind: source.kind,
       sourceId,
       definition: source.definition,
       agentHeads: { ...source.agentHeads },
-      pluginBindings: safeForkBindings(source.pluginBindings),
+      pluginBindings: immutable(safeForkBindings(source.pluginBindings)),
       ledgerFrontier: source.ledgerFrontier,
       scope,
       status: "running",
@@ -214,11 +265,11 @@ export class Swarm {
     return snapshotFork(fork)
   }
 
-  async runForks(forkIds) {
+  async runForks(forkIds: string[]): Promise<ForkSnapshot[]> {
     return Promise.all(forkIds.map((forkId) => this.runFork(forkId)))
   }
 
-  async runFork(forkId) {
+  async runFork(forkId: string): Promise<ForkSnapshot> {
     const fork = this.#mutableFork(forkId)
     if (fork.status !== "running") throw new Error(`Fork is not runnable: ${forkId}`)
     const results = []
@@ -228,7 +279,7 @@ export class Swarm {
       const inputs = test.inputEvents.map((input) =>
         this.ledger.append({
           type: input.type,
-          schema: input.schema,
+          ...(input.schema ? { schema: input.schema } : {}),
           actor: `test/${test.id}`,
           scope: fork.scope,
           causation: [fork.createdEventId],
@@ -242,11 +293,7 @@ export class Swarm {
         .inScope(fork.scope)
         .filter((event) => event.seq > startSeq && event.type === test.expect.eventType)
       results.push(
-        immutable({
-          testId: test.id,
-          passed: matching.length > 0,
-          evidenceEventIds: matching.map((event) => event.id),
-        }),
+        immutable({ testId: test.id, passed: matching.length > 0, evidenceEventIds: matching.map((event) => event.id) }),
       )
     }
 
@@ -271,7 +318,7 @@ export class Swarm {
     return snapshotFork(fork)
   }
 
-  selectFork({ proposalId, forkId, selectedBy }) {
+  selectFork({ proposalId, forkId, selectedBy }: { proposalId: string; forkId: string; selectedBy: string }): Selection {
     const fork = this.#mutableFork(forkId)
     if (fork.sourceKind !== "proposal" || fork.sourceId !== proposalId) {
       throw new Error("Only a Proposal Fork can be selected for a Candidate")
@@ -282,7 +329,7 @@ export class Swarm {
       type: "swarm.fork.selected",
       actor: selectedBy,
       scope: activeScope(),
-      causation: [fork.evaluationEventId],
+      causation: [fork.evaluationEventId!],
       data: { proposalId, forkId },
     })
     const selection = immutable({ proposalId, forkId, eventId: event.id })
@@ -290,7 +337,7 @@ export class Swarm {
     return selection
   }
 
-  freezeCandidate(proposalId) {
+  freezeCandidate(proposalId: string): SwarmRevision {
     const proposal = this.proposal(proposalId)
     const selection = this.#selections.get(proposalId)
     if (!selection) throw new Error("Select an evaluated Fork before freezing a Candidate")
@@ -303,15 +350,14 @@ export class Swarm {
       definitionDigest: digest(proposal.definition),
       agentHeads: { ...fork.agentHeads },
       workspaceCommits: mergeWorkspaceCommits(
-        proposal.definition,
         proposal.workspaceCommits,
-        collectWorkspaceCommits(this.ledger.all(), proposal.ledgerFrontier, fork.scope, proposal.definition),
+        collectWorkspaceCommits(this.ledger.all(), proposal.ledgerFrontier, fork.scope),
       ),
       pluginBindings: proposal.pluginBindings,
-      evaluationEventIds: [fork.evaluationEventId],
+      evaluationEventIds: [fork.evaluationEventId!],
       ledgerFrontier: this.ledger.head().seq + 1,
     }
-    const candidate = immutable({ id: contentId("revision", body), ...body })
+    const id = contentId("revision", body)
     const event = this.ledger.append({
       type: "swarm.revision.frozen",
       actor: "swarm/runtime",
@@ -319,20 +365,20 @@ export class Swarm {
       causation: [selection.eventId],
       swarmRevision: proposal.baseRevision,
       data: {
-        candidateRevisionId: candidate.id,
+        candidateRevisionId: id,
         proposalId,
         selectedForkId: fork.id,
-        definitionDigest: candidate.definitionDigest,
+        definitionDigest: body.definitionDigest,
         agentHeads: fork.agentHeads,
-        workspaceCommits: candidate.workspaceCommits,
+        workspaceCommits: body.workspaceCommits,
       },
     })
-    const stored = immutable({ ...candidate, frozenEventId: event.id })
-    this.#candidates.set(stored.id, stored)
-    return stored
+    const candidate = immutable<SwarmRevision>({ id, ...body, frozenEventId: event.id })
+    this.#candidates.set(id, candidate)
+    return candidate
   }
 
-  approveAndActivate(candidateId, human) {
+  approveAndActivate(candidateId: string, human: string): SwarmRevision {
     assertHuman(human)
     const candidate = this.#candidates.get(candidateId)
     if (!candidate) throw new Error(`unknown Candidate: ${candidateId}`)
@@ -357,32 +403,30 @@ export class Swarm {
     this.#revisions.set(candidate.id, candidate)
     this.#activeRevisionId = candidate.id
     this.#agentHeads.clear()
-    for (const [agentId, head] of Object.entries(candidate.agentHeads)) {
-      this.#agentHeads.set(agentId, head)
-    }
+    for (const [agentId, head] of Object.entries(candidate.agentHeads)) this.#agentHeads.set(agentId, head)
     return candidate
   }
 
-  proposal(id) {
+  proposal(id: string): SwarmProposal {
     const proposal = this.#proposals.get(id)
     if (!proposal) throw new Error(`unknown Proposal: ${id}`)
     return proposal
   }
 
-  fork(id) {
+  fork(id: string): ForkSnapshot {
     return snapshotFork(this.#mutableFork(id))
   }
 
-  eventsVisibleToFork(forkId) {
+  eventsVisibleToFork(forkId: string): LedgerEvent[] {
     const fork = this.#mutableFork(forkId)
     return this.ledger.visibleToFork(forkId, fork.ledgerFrontier)
   }
 
-  async #drainFork(fork, initialEvents) {
+  async #drainFork(fork: MutableFork, initialEvents: LedgerEvent[]): Promise<void> {
     const queue = [...initialEvents]
     let deliveries = 0
     while (queue.length > 0) {
-      const event = queue.shift()
+      const event = queue.shift()!
       const routes = fork.definition.routes.filter((route) => route.on === event.type)
       for (const route of routes) {
         deliveries += 1
@@ -390,9 +434,18 @@ export class Swarm {
         const agent = findAgent(fork.definition, route.to)
         const result = await this.agentRuntime.runTurn({
           agent,
-          baseCommit: fork.agentHeads[agent.id],
+          baseCommit: fork.agentHeads[agent.id]!,
           scope: fork.scope,
           inputEvents: [event],
+          runtimeContext: {
+            swarm: projectAgentSwarmView(
+              fork.definition,
+              agent.id,
+              { kind: fork.sourceKind, id: fork.sourceId },
+              fork.scope,
+              fork.pluginBindings,
+            ),
+          },
         })
         fork.agentHeads[agent.id] = result.revision.commit
         queue.push(...result.outputEvents)
@@ -402,13 +455,13 @@ export class Swarm {
     }
   }
 
-  #mutableFork(id) {
+  #mutableFork(id: string): MutableFork {
     const fork = this.#forks.get(id)
     if (!fork) throw new Error(`unknown Fork: ${id}`)
     return fork
   }
 
-  #forkSource(id) {
+  #forkSource(id: string): ForkSource {
     const proposal = this.#proposals.get(id)
     if (proposal) {
       return {
@@ -439,91 +492,7 @@ export class Swarm {
   }
 }
 
-export function validateDefinition(definition) {
-  if (!definition || typeof definition !== "object") throw new Error("Swarm Definition is required")
-  const copy = structuredClone({
-    agents: definition.agents ?? [],
-    routes: definition.routes ?? [],
-    externalChannels: definition.externalChannels ?? [],
-    plugins: definition.plugins ?? [],
-    tests: definition.tests ?? [],
-  })
-  const ids = new Set()
-  for (const agent of copy.agents) {
-    if (!agent.id || !agent.harness) throw new Error("Every Agent requires id and harness")
-    if (ids.has(agent.id)) throw new Error(`duplicate Agent: ${agent.id}`)
-    ids.add(agent.id)
-  }
-  for (const route of copy.routes) {
-    if (!route.on || !ids.has(route.to)) throw new Error("Every route requires an Event type and existing Agent")
-  }
-  for (const channel of copy.externalChannels) {
-    if (!channel.plugin || !ids.has(channel.ingressTo)) {
-      throw new Error("External channel requires a Plugin and existing ingress Agent")
-    }
-    if (!Array.isArray(channel.egressFrom) || channel.egressFrom.some((agentId) => !ids.has(agentId))) {
-      throw new Error("External channel egress Agents must exist")
-    }
-  }
-  for (const test of copy.tests) {
-    if (!test.id || !Array.isArray(test.inputEvents) || test.inputEvents.length === 0) {
-      throw new Error("Every Swarm test requires id and input Events")
-    }
-    if (!test.expect?.eventType) throw new Error("Every Swarm test requires an expected Event type")
-  }
-  return immutable(copy)
-}
-
-function assertCompleteHeads(definition, heads) {
-  const expected = definition.agents.map((agent) => agent.id).sort()
-  const actual = Object.keys(heads).sort()
-  if (JSON.stringify(expected) !== JSON.stringify(actual)) {
-    throw new Error("Agent heads must exactly match the proposed Swarm Definition")
-  }
-}
-
-function collectWorkspaceCommits(events, afterSeq, scope, definition) {
-  const commits = Object.fromEntries(definition.agents.map((agent) => [agent.id, []]))
-  for (const event of events) {
-    if (
-      event.seq <= afterSeq ||
-      event.type !== "agent.workspace.committed" ||
-      !sameScope(event.scope, scope) ||
-      !commits[event.data.agentId]
-    ) {
-      continue
-    }
-    commits[event.data.agentId].push({ commit: event.data.commit, eventId: event.id })
-  }
-  return commits
-}
-
-function mergeWorkspaceCommits(definition, ...groups) {
-  return Object.fromEntries(
-    definition.agents.map((agent) => [agent.id, groups.flatMap((group) => group[agent.id] ?? [])]),
-  )
-}
-
-function sameScope(left, right) {
-  return left.kind === right.kind && (left.kind === "active" || left.forkId === right.forkId)
-}
-
-function findAgent(definition, agentId) {
-  const agent = definition.agents.find((item) => item.id === agentId)
-  if (!agent) throw new Error(`unknown Agent: ${agentId}`)
-  return agent
-}
-
-function safeForkBindings(bindings) {
-  return immutable(
-    bindings.map((binding) => ({
-      ...binding,
-      mode: binding.mode === "live" ? "mock" : binding.mode,
-    })),
-  )
-}
-
-function snapshotFork(fork) {
+function snapshotFork(fork: MutableFork): ForkSnapshot {
   return immutable({
     id: fork.id,
     sourceKind: fork.sourceKind,
@@ -539,8 +508,14 @@ function snapshotFork(fork) {
   })
 }
 
-function assertHuman(human) {
+function assertHuman(human: string): void {
   if (typeof human !== "string" || human.trim() === "" || human.startsWith("agent/")) {
     throw new Error("Human principal is required")
   }
+}
+
+function isPluginCommunication(data: unknown): data is { source: { plugin: string }; to?: string[] } {
+  if (!data || typeof data !== "object") return false
+  const candidate = data as { source?: { plugin?: unknown }; to?: unknown }
+  return typeof candidate.source?.plugin === "string"
 }

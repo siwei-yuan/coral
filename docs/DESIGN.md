@@ -34,6 +34,23 @@ logical Agent turn, workspace commits, and Swarm evolution. Native tool calls,
 reasoning, file reads, model tokens, queue state, and Plugin transport details
 remain in their native operational stores.
 
+## Code boundaries
+
+```text
+core/ledger
+core/workspace
+core/agent       -> Ledger + Workspace + Harness contract
+core/swarm       -> Agent + Ledger + commit IDs
+harness
+plugins
+snapshots
+```
+
+Workspace never imports Swarm. Agent Runtime knows no Proposal, Revision, or
+Fork semantics. Swarm never performs Git operations directly. Harness Adapters
+receive already-composed context and do not decide which workspace files to
+include.
+
 ## Workspace ownership
 
 An Agent writes its own workspace. A commit immediately becomes that Agent
@@ -49,6 +66,18 @@ A Swarm Revision is an immutable aggregate of one complete Definition and the
 workspace commits produced by multiple Agents since its parent Revision. It
 also records the resulting head for every Agent. The Revision references those
 commits; it does not turn ordinary workspace commits into gated changes.
+
+`SwarmDefinition` is the Agent graph; there is no second `GraphRevision` type.
+Adding or removing an Agent means proposing another complete Definition:
+
+- A new Agent must have an independently initialized workspace commit and an
+  entry in the Proposal's exact `agentHeads` set.
+- A removed Agent must have no remaining Route or External Channel references.
+- Removal never deletes its workspace repository, commits, or Ledger Events.
+- Workspace commits made by an Agent before its removal remain in the new
+  Revision's `workspaceCommits`, even though it is absent from final
+  `agentHeads`.
+- Rename is remove plus add.
 
 A Proposal pins one base Revision, the complete proposed Definition, every
 Agent head, the workspace commits accumulated since the base, Plugin bindings,
@@ -76,6 +105,24 @@ An Agent changes its own responsibility, context, memory, skills, or context
 composition by editing its workspace. The resulting commit affects its next
 turn immediately. A later Swarm Revision may aggregate that commit alongside
 commits from other Agents; this does not change the commit's workspace meaning.
+
+## Agent Swarm view
+
+Before every turn, Swarm projects the source Definition into an
+`AgentSwarmView` containing the Agent's own ID, all Agent IDs, their routed
+Event types, Routes, external-facing status, Plugin IDs/modes, source
+Revision/Proposal, and active/Fork scope. Proposal Forks therefore see the
+proposed topology; historical Revision Forks see the historical topology.
+
+The view intentionally excludes tests and expected results, Plugin digests and
+secrets, other Agents' workspace contents, and Harness trajectories. It is a
+runtime input, not a workspace file, so it cannot become a stale second copy of
+the Definition.
+
+The Workspace Bridge passes this structured view to `context.ts`. The default
+Snapshot composer renders it as concise Markdown. An Agent may edit
+`context.ts` to reorder, reformat, or omit it, preserving Agent ownership of
+context composition while Core remains the source of topology facts.
 
 ## Plugins
 

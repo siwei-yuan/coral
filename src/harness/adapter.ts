@@ -1,0 +1,29 @@
+import type { ContextMessage } from "../core/workspace/context-bridge.ts"
+import type { LedgerEvent, Scope } from "../core/ledger/ledger.ts"
+
+export interface HarnessEmission {
+  type: string
+  schema?: string
+  data?: unknown
+  evidence?: unknown
+}
+
+export interface HarnessResult {
+  outcome?: string
+  events?: HarnessEmission[]
+  trajectory?: unknown
+}
+
+export interface HarnessInput {
+  turnId: string
+  agentId: string
+  scope: Scope
+  workingDirectory: string
+  inputEvents: LedgerEvent[]
+  context: ContextMessage[]
+}
+
+export interface HarnessAdapter {
+  id: string
+  run(input: HarnessInput): Promise<HarnessResult>
+}

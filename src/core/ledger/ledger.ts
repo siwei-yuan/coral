@@ -1,9 +1,40 @@
-import { digest, immutable } from "./canonical.js"
+import { digest, immutable } from "../canonical.ts"
+
+export type Scope = { kind: "active" } | { kind: "fork"; forkId: string }
+
+export interface EventDraft {
+  type: string
+  schema?: string
+  actor: string
+  scope: Scope
+  causation?: string[]
+  correlation?: string
+  swarmRevision?: string
+  data?: unknown
+  evidence?: unknown
+}
+
+export interface LedgerEvent {
+  id: string
+  seq: number
+  type: string
+  schema: string
+  actor: string
+  scope: Scope
+  causation: string[]
+  correlation?: string
+  swarmRevision?: string
+  data: unknown
+  evidence?: unknown
+  recordedAt: string
+  previousHash: string | null
+  hash: string
+}
 
 export class Ledger {
-  #events = []
+  #events: LedgerEvent[] = []
 
-  append(draft) {
+  append(draft: EventDraft): LedgerEvent {
     validateDraft(draft)
     const seq = this.#events.length + 1
     const previousHash = this.#events.at(-1)?.hash ?? null
@@ -22,26 +53,26 @@ export class Ledger {
       previousHash,
     }
     const hash = digest(body)
-    const event = immutable({ id: `event_${seq}_${hash.slice(0, 12)}`, ...body, hash })
+    const event = immutable<LedgerEvent>({ id: `event_${seq}_${hash.slice(0, 12)}`, ...body, hash })
     this.#events.push(event)
     return event
   }
 
-  get(id) {
+  get(id: string): LedgerEvent {
     const event = this.#events.find((item) => item.id === id)
     if (!event) throw new Error(`unknown Event: ${id}`)
     return event
   }
 
-  all() {
+  all(): LedgerEvent[] {
     return [...this.#events]
   }
 
-  inScope(scope) {
+  inScope(scope: Scope): LedgerEvent[] {
     return this.#events.filter((event) => sameScope(event.scope, scope))
   }
 
-  visibleToFork(forkId, activeFrontier) {
+  visibleToFork(forkId: string, activeFrontier: number): LedgerEvent[] {
     return this.#events.filter(
       (event) =>
         (event.scope.kind === "active" && event.seq <= activeFrontier) ||
@@ -49,35 +80,40 @@ export class Ledger {
     )
   }
 
-  head() {
+  head(): { seq: number; hash: string | null } {
     const last = this.#events.at(-1)
     return { seq: last?.seq ?? 0, hash: last?.hash ?? null }
   }
 
-  verify() {
-    let previousHash = null
+  verify(): boolean {
+    let previousHash: string | null = null
     for (let index = 0; index < this.#events.length; index += 1) {
       const event = this.#events[index]
+      if (!event) return false
       const { id: _id, hash, ...body } = event
-      if (event.seq !== index + 1 || event.previousHash !== previousHash || digest(body) !== hash) {
-        return false
-      }
+      if (event.seq !== index + 1 || event.previousHash !== previousHash || digest(body) !== hash) return false
       previousHash = hash
     }
     return true
   }
 }
 
-export function activeScope() {
+export function activeScope(): Scope {
   return immutable({ kind: "active" })
 }
 
-export function forkScope(forkId) {
+export function forkScope(forkId: string): Scope {
   if (!forkId) throw new Error("Fork scope requires forkId")
   return immutable({ kind: "fork", forkId })
 }
 
-function validateDraft(draft) {
+export function sameScope(left: Scope, right: Scope): boolean {
+  if (left.kind !== right.kind) return false
+  if (left.kind === "active") return true
+  return right.kind === "fork" && left.forkId === right.forkId
+}
+
+function validateDraft(draft: EventDraft): void {
   if (!draft || typeof draft !== "object") throw new TypeError("Event draft is required")
   if (typeof draft.type !== "string" || draft.type.length === 0) throw new TypeError("Event type is required")
   if (typeof draft.actor !== "string" || draft.actor.length === 0) throw new TypeError("Event actor is required")
@@ -85,8 +121,4 @@ function validateDraft(draft) {
     throw new TypeError("Event scope must be active or fork")
   }
   if (draft.scope.kind === "fork" && !draft.scope.forkId) throw new TypeError("Fork scope requires forkId")
-}
-
-function sameScope(left, right) {
-  return left.kind === right.kind && (left.kind === "active" || left.forkId === right.forkId)
 }

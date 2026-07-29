@@ -4,10 +4,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test",
-    "check": "npm test"
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test"
   },
   "engines": {
     "node": ">=22.18"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
   }
 }

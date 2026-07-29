@@ -1,22 +1,22 @@
 import { createHash } from "node:crypto"
 
-export function canonicalJson(value) {
+export function canonicalJson(value: unknown): string {
   return JSON.stringify(normalize(value))
 }
 
-export function digest(value) {
+export function digest(value: unknown): string {
   return createHash("sha256").update(canonicalJson(value)).digest("hex")
 }
 
-export function contentId(prefix, value) {
+export function contentId(prefix: string, value: unknown): string {
   return `${prefix}_${digest(value).slice(0, 24)}`
 }
 
-export function immutable(value) {
+export function immutable<T>(value: T): T {
   return deepFreeze(structuredClone(value))
 }
 
-function normalize(value) {
+function normalize(value: unknown): unknown {
   if (value === null || typeof value === "string" || typeof value === "boolean") return value
   if (typeof value === "number") {
     if (!Number.isFinite(value)) throw new TypeError("canonical values require finite numbers")
@@ -34,7 +34,7 @@ function normalize(value) {
   throw new TypeError(`unsupported canonical value: ${typeof value}`)
 }
 
-function deepFreeze(value) {
+function deepFreeze<T>(value: T): T {
   if (value && typeof value === "object" && !Object.isFrozen(value)) {
     Object.freeze(value)
     for (const item of Object.values(value)) deepFreeze(item)
