@@ -12,7 +12,8 @@ function renderSwarm(swarm) {
     const label = agent.self ? `${agent.id} (you)` : agent.id
     const receives = agent.receives.length > 0 ? agent.receives.join(", ") : "nobody"
     const sendsTo = agent.sendsTo.length > 0 ? agent.sendsTo.join(", ") : "nobody"
-    return `- ${label}: receives from ${receives}; sends to ${sendsTo}${agent.externalFacing ? "; external-facing" : ""}`
+    const pluginIngress = agent.receivesFromPlugins.length > 0 ? `; Plugin ingress: ${agent.receivesFromPlugins.join(", ")}` : ""
+    return `- ${label}: receives from ${receives}; sends to ${sendsTo}${pluginIngress}`
   })
   const routes = swarm.routes.map((route) => `- ${route.from} -> ${route.to}`)
   const plugins = swarm.plugins.map((plugin) => `- ${plugin.id}: ${plugin.command} (${plugin.mode})`)

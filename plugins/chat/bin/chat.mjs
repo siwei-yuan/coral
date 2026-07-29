@@ -19,6 +19,7 @@ const reply = {
   to: option(args, "--to"),
   text: option(args, "--text"),
   causedBy: option(args, "--caused-by"),
+  queuedAt: new Date().toISOString(),
 }
 if (!reply.to.startsWith("external/")) fail("--to must be an external recipient")
 

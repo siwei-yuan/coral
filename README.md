@@ -78,8 +78,9 @@ set and communication graph in their runtime Swarm view.
 Each Plugin binding names one shell command and the Agents allowed to see it.
 The Harness receives only those command descriptors; no Plugin file is copied
 into an Agent workspace. Plugin CLI calls remain Harness operations. Chat user
-input, Chat replies, and new Screen activities become `communication.sent`
-because they are high-level communication facts.
+input and new Screen activities enter the Swarm as `communication.sent`.
+Agent output goes directly through a Plugin CLI and its runtime; it is not an
+outbound Ledger Event.
 
 A Revision is a point-in-time snapshot, not a second running Swarm and not a
 barrier around later workspace work. Main and Forks run; Revisions only record
@@ -121,9 +122,16 @@ npm run check
 Once a `Swarm` is running, its built-in Human surface is one object:
 
 ```ts
-const view = new DefaultView(swarm, "owner")
+const view = new DefaultView({ swarm, human: "owner" })
 const { url } = await view.listen({ port: 3000 })
 ```
 
 Other Views may read the same Ledger and call the same Human-gated Swarm
 commands without inheriting the default renderer or server.
+
+The default View renders every Plugin generically from its Definition and
+inbound Communication Events: ingress destination, CLI exposure, and Event
+flow. A Plugin may optionally provide a View-only extension. `ChatView` adds a
+conversation surface backed by Chat's own sent-message store; `ScreenView`
+renders Screen's raw image, OCR, and foreground App session. Extensions add UI
+only and receive no Revision decision authority.

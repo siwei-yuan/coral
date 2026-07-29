@@ -5,12 +5,12 @@ import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
-import { ChatRuntime, ScreenRuntime, forkScope } from "../src/index.ts"
+import { ChatRuntime, ScreenRuntime } from "../src/index.ts"
 import { createFixture } from "../test-support/fixture.ts"
 
 const execute = promisify(execFile)
 
-test("Chat Runtime turns user input and an Agent CLI reply into auditable Communication", async (t) => {
+test("Chat Runtime ingests user Communication and sends Agent CLI replies outside the Ledger", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "corallum-chat-"))
   t.after(() => rm(root, { recursive: true, force: true }))
   const sent: unknown[] = []
@@ -26,6 +26,7 @@ test("Chat Runtime turns user input and an Agent CLI reply into auditable Commun
     }),
   )
   assert.deepEqual((inbound.data as { to: string[] }).to, ["agent/builder"])
+  const ledgerFrontier = ledger.head().seq
 
   const executable = chat.executable()
   await execute(
@@ -43,15 +44,13 @@ test("Chat Runtime turns user input and an Agent CLI reply into auditable Commun
     ],
     { env: { ...process.env, ...executable.env } },
   )
-  const [reply] = await chat.takeReplies("builder")
-  assert.ok(reply)
-  const outbound = swarm.ingest(reply)
-  assert.deepEqual(outbound.causation, [inbound.id])
-  await chat.deliver(outbound, swarm.pluginBindingForEgress("chat", outbound))
+  const binding = swarm.activeRevision().definition.plugins.find((plugin) => plugin.id === "chat")!
+  const [reply] = await chat.flushReplies(binding)
   assert.equal(sent.length, 1)
-
-  const forked = ledger.append({ ...reply, scope: forkScope("fork-for-test") })
-  assert.throws(() => swarm.pluginBindingForEgress("chat", forked), /Fork Events cannot use live external egress/)
+  assert.equal(reply?.causedBy, inbound.id)
+  assert.equal(ledger.head().seq, ledgerFrontier)
+  assert.deepEqual(await chat.replies(), [reply])
+  await assert.rejects(() => chat.flushReplies({ ...binding, mode: "mock" }), /must be live/)
 })
 
 test("Screen Runtime publishes an activity Event and its CLI reads App, OCR, and raw image", async (t) => {
@@ -88,4 +87,5 @@ test("Screen Runtime publishes an activity Event and its CLI reads App, OCR, and
   assert.equal(activity.app.name, "Codex")
   assert.equal(activity.captures[0]?.ocr, "Implement the Screen Plugin")
   assert.equal(await readFile(activity.captures[0]!.image, "utf8"), "raw-image")
+  assert.equal((await screen.current())?.app.name, "Codex")
 })

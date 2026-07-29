@@ -17,8 +17,8 @@ export { Swarm } from "./core/swarm/runtime.ts"
 export { projectAgentSwarmView, validateDefinition } from "./core/swarm/definition.ts"
 export type {
   AgentSwarmView,
-  ExternalChannel,
   PluginBinding,
+  PluginIngress,
   Route,
   SwarmDefinition,
   SwarmTest,
@@ -33,15 +33,21 @@ export type {
   PluginExecutable,
 } from "./harness/adapter.ts"
 export { ChatRuntime } from "../plugins/chat/runtime.ts"
+export type { ChatMessage, ChatReply } from "../plugins/chat/runtime.ts"
+export { ChatView } from "../plugins/chat/view.ts"
 export { ScreenRuntime } from "../plugins/screen/runtime.ts"
 export type { ScreenActivity, ScreenActivityInput, ScreenCaptureInput } from "../plugins/screen/runtime.ts"
+export { ScreenView } from "../plugins/screen/view.ts"
 export { SnapshotStore } from "./snapshots/store.ts"
-export { DefaultView, projectLedger, renderDefaultView } from "./view/default/index.ts"
+export { DefaultView, projectLedger, renderDefaultView, renderExtensionPage } from "./view/default/index.ts"
+export type { ViewExtension, ViewExtensionLink } from "./view/extension.ts"
 export type {
   DefaultViewModel,
   DefaultViewServer,
   ForkTestView,
   ForkView,
+  PluginEventView,
+  PluginView,
   ProposalView,
   RevisionView,
 } from "./view/default/index.ts"

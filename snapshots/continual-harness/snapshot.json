@@ -19,7 +19,7 @@
         "to": "refiner"
       }
     ],
-    "externalChannels": [],
+    "pluginIngress": [],
     "plugins": [],
     "tests": [
       {

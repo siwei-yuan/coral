@@ -46,12 +46,32 @@ export interface ForkView {
   createdAt: string
 }
 
+export interface PluginEventView {
+  id: string
+  seq: number
+  type: string
+  actor: string
+  recipients: string[]
+  scope: "main" | string
+  recordedAt: string
+}
+
+export interface PluginView {
+  id: string
+  command: string
+  mode: string
+  exposedTo: string[]
+  ingressTo: string | null
+  events: PluginEventView[]
+}
+
 export interface DefaultViewModel {
   activeRevision: RevisionView | null
   activeWorkspaceHeads: Record<string, string>
   revisions: RevisionView[]
   proposals: ProposalView[]
   forks: ForkView[]
+  plugins: PluginView[]
   events: LedgerEvent[]
 }
 
@@ -126,8 +146,35 @@ export function projectLedger(events: LedgerEvent[]): DefaultViewModel {
     }]
   })
 
+  const plugins = activeRevision?.definition.plugins.map((binding): PluginView => ({
+    id: binding.id,
+    command: binding.command,
+    mode: binding.mode,
+    exposedTo: binding.exposedTo,
+    ingressTo: activeRevision.definition.pluginIngress.find((item) => item.plugin === binding.id)?.ingressTo ?? null,
+    events: ordered.flatMap((event): PluginEventView[] => {
+      if (!isPluginEvent(event, binding.id)) return []
+      const data = event.data as { to?: unknown }
+      return [{
+        id: event.id,
+        seq: event.seq,
+        type: event.type,
+        actor: event.actor,
+        recipients: Array.isArray(data.to) ? data.to.filter((item): item is string => typeof item === "string") : [],
+        scope: event.scope.kind === "active" ? "main" : event.scope.forkId,
+        recordedAt: event.recordedAt,
+      }]
+    }),
+  })) ?? []
+
   const activeWorkspaceHeads = activeRevision ? activeHeads(activeRevision, ordered) : {}
-  return { activeRevision, activeWorkspaceHeads, revisions, proposals, forks, events: ordered }
+  return { activeRevision, activeWorkspaceHeads, revisions, proposals, forks, plugins, events: ordered }
+}
+
+function isPluginEvent(event: LedgerEvent, pluginId: string): boolean {
+  if (event.type !== "communication.sent" || !event.data || typeof event.data !== "object") return false
+  const data = event.data as { source?: { plugin?: unknown } }
+  return event.actor === `plugin/${pluginId}` || data.source?.plugin === pluginId
 }
 
 function activeHeads(revision: RevisionView, events: LedgerEvent[]): Record<string, string> {

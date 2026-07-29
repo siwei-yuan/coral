@@ -165,8 +165,8 @@ workspace meaning.
 
 Before every turn, Swarm projects the source Definition into an
 `AgentSwarmView` containing the Agent's own ID, all Agent IDs, their routed
-senders and recipients, Routes, external-facing status, authorized Plugin
-commands/modes, source Revision/Proposal, and active/Fork scope. Proposal Forks
+senders and recipients, incoming Plugin names, authorized Plugin commands and
+modes, source Revision/Proposal, and active/Fork scope. Proposal Forks
 therefore see the proposed topology; historical Revision Forks see the
 historical topology.
 
@@ -194,15 +194,18 @@ Agents. Its implementation and runtime data remain outside Agent workspaces.
 the Harness receives those command descriptors for the turn. The current
 implementation does not claim OS-level command isolation.
 
-CLI calls are Harness operations, not Ledger Events. Semantic ingress and
-egress still use `communication.sent`: Chat Runtime turns user input and Agent
-CLI replies into Communication Events, while Screen Runtime announces a new
-activity and lets the Agent query its raw image, OCR, and foreground App session
-through the `screen` CLI. No Plugin copies files into or initializes an Agent
-workspace.
+CLI calls are Harness operations, not Ledger Events. Plugin Events are inbound:
+Chat Runtime turns user input into a Communication Event, while Screen Runtime
+announces a new activity and lets the Agent query its raw image, OCR, and
+foreground App session through the `screen` CLI. Agent output takes the reverse
+path directly through a Plugin CLI and the Plugin-owned runtime. It does not
+become an outbound Ledger Event. No Plugin copies files into or initializes an
+Agent workspace.
 
-Only the active Swarm may use live external egress. Forks replace live bindings
-with mock mode.
+`pluginIngress` says which Agent receives a Plugin's inbound Events. It is not a
+bidirectional channel. `plugins[].exposedTo` separately says which Agents can
+see that Plugin's CLI. Forks replace live bindings with mock mode; actual
+runtime isolation remains part of the deferred Agent-plus-workspace sandbox.
 
 ## Views
 
@@ -216,6 +219,14 @@ private lifecycle model. Replaying the Ledger reconstructs active topology,
 Revision and Proposal history, Fork heads and evidence, derived test results,
 collaboration, and Human Decisions. Its local HTTP surface renders an Agent
 canvas, evolution path, Fork comparison, and Ledger timeline.
+
+The default View understands Plugins only through their Definition and inbound
+Communication Events. It renders ingress routing and CLI exposure without any
+Chat- or Screen-specific branches. A runtime may register an optional
+`ViewExtension` for an active Plugin. The extension owns only its page and
+actions: Chat adds a message surface backed by its Plugin store; Screen renders
+its current activity artifacts. Extensions are not part of SwarmDefinition or
+a Revision and are never given Fork, approve, or deny authority.
 
 The Ledger is the control-plane source of truth, not a container for all raw
 bytes. A View follows Ledger references to Git for workspace files, Harness

@@ -139,10 +139,10 @@ export class Swarm {
   ingest(draft: EventDraft): LedgerEvent {
     let data = structuredClone(draft.data ?? null)
     if (draft.type === "communication.sent" && isPluginCommunication(data)) {
-      const channel = this.activeRevision().definition.externalChannels.find(
+      const channel = this.activeRevision().definition.pluginIngress.find(
         (binding) => binding.plugin === data.source.plugin,
       )
-      if (!channel) throw new Error(`No external channel for Plugin: ${data.source.plugin}`)
+      if (!channel) throw new Error(`No ingress for Plugin: ${data.source.plugin}`)
       if (!Array.isArray(data.to) || data.to.length === 0) data.to = [`agent/${channel.ingressTo}`]
     }
     return this.ledger.append({
@@ -151,19 +151,6 @@ export class Swarm {
       swarmRevision: this.activeRevision().id,
       data,
     })
-  }
-
-  pluginBindingForEgress(pluginId: string, event: LedgerEvent): PluginBinding {
-    if (event.scope.kind !== "active") throw new Error("Fork Events cannot use live external egress")
-    const revision = this.activeRevision()
-    const plugin = revision.definition.plugins.find((binding) => binding.id === pluginId)
-    if (!plugin || plugin.mode !== "live") throw new Error(`Plugin is not live: ${pluginId}`)
-    const channel = revision.definition.externalChannels.find((binding) => binding.plugin === pluginId)
-    const agentId = event.actor.startsWith("agent/") ? event.actor.slice("agent/".length) : null
-    if (!channel || !agentId || !channel.egressFrom.includes(agentId)) {
-      throw new Error("Event actor is not an external-facing Agent")
-    }
-    return plugin
   }
 
   async runAgentTurn(input: { agentId: string; inputEventId: string }): Promise<AgentTurnResult> {

@@ -1,4 +1,4 @@
-import { mkdir, rename, writeFile } from "node:fs/promises"
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { randomUUID } from "node:crypto"
 import { fileURLToPath } from "node:url"
@@ -43,6 +43,25 @@ export class ScreenRuntime {
       executable: fileURLToPath(new URL("bin/screen.mjs", import.meta.url)),
       env: { CORALLUM_PLUGIN_STATE: this.stateRoot },
     }
+  }
+
+  async current(): Promise<ScreenActivity | null> {
+    try {
+      const current = JSON.parse(await readFile(join(this.stateRoot, "current.json"), "utf8")) as {
+        activityId?: string
+      }
+      return current.activityId ? this.activity(current.activityId) : null
+    } catch (error) {
+      if (isMissing(error)) return null
+      throw error
+    }
+  }
+
+  async activity(id: string): Promise<ScreenActivity> {
+    assertId(id)
+    const root = join(this.stateRoot, "activities", id)
+    const activity = JSON.parse(await readFile(join(root, "activity.json"), "utf8")) as ScreenActivity
+    return { ...activity, captures: activity.captures.map((capture) => ({ ...capture, image: join(root, capture.image) })) }
   }
 
   async publish(input: ScreenActivityInput): Promise<EventDraft> {
@@ -94,4 +113,8 @@ export class ScreenRuntime {
 
 function assertId(id: string): void {
   if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error(`Invalid Screen activity identifier: ${id}`)
+}
+
+function isMissing(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT"
 }

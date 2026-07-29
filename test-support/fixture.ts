@@ -35,7 +35,10 @@ export async function createFixture(t: TestContext) {
   const swarm = new Swarm({
     ledger,
     agentRuntime,
-    pluginExecutables: [{ id: "chat", executable: "/plugins/chat/bin/chat" }],
+    pluginExecutables: [
+      { id: "chat", executable: "/plugins/chat/bin/chat" },
+      { id: "screen", executable: "/plugins/screen/bin/screen" },
+    ],
   })
   const definition: SwarmDefinition = {
     agents: [
@@ -43,7 +46,7 @@ export async function createFixture(t: TestContext) {
       { id: "reviewer", harness: "scripted" },
     ],
     routes: [{ from: "builder", to: "reviewer" }],
-    externalChannels: [{ plugin: "chat", ingressTo: "builder", egressFrom: ["builder"] }],
+    pluginIngress: [{ plugin: "chat", ingressTo: "builder" }],
     plugins: [{ id: "chat", command: "chat", exposedTo: ["builder"], mode: "live" }],
     tests: [
       {
@@ -88,7 +91,8 @@ function renderSwarm(swarm) {
     const label = agent.self ? \`\${agent.id} (you)\` : agent.id
     const receives = agent.receives.length > 0 ? agent.receives.join(", ") : "nobody"
     const sendsTo = agent.sendsTo.length > 0 ? agent.sendsTo.join(", ") : "nobody"
-    return \`- \${label}: receives from \${receives}; sends to \${sendsTo}\${agent.externalFacing ? "; external-facing" : ""}\`
+    const pluginIngress = agent.receivesFromPlugins.length > 0 ? \`; Plugin ingress: \${agent.receivesFromPlugins.join(", ")}\` : ""
+    return \`- \${label}: receives from \${receives}; sends to \${sendsTo}\${pluginIngress}\`
   })
   const routes = swarm.routes.map((route) => \`- \${route.from} -> \${route.to}\`)
   const plugins = swarm.plugins.map((plugin) => \`- \${plugin.id}: \${plugin.command} (\${plugin.mode})\`)

@@ -89,6 +89,14 @@ test("a Revision snapshots Agent commits and Forks can start from any Revision o
   assert.notEqual(firstResult?.agentHeads.builder, secondResult?.agentHeads.builder)
   const projected = projectLedger(ledger.all())
   assert.deepEqual(projected.proposals[0]?.definition, proposedDefinition)
+  assert.deepEqual(projected.plugins[0], {
+    id: "chat",
+    command: "chat",
+    mode: "live",
+    exposedTo: ["builder"],
+    ingressTo: "builder",
+    events: [],
+  })
   assert.equal(projected.forks.find((fork) => fork.id === first.id)?.tests[0]?.passed, true)
   assert.equal(
     swarm.eventsVisibleToFork(first.id).some(

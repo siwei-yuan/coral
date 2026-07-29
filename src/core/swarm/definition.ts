@@ -7,10 +7,9 @@ export interface Route {
   to: string
 }
 
-export interface ExternalChannel {
+export interface PluginIngress {
   plugin: string
   ingressTo: string
-  egressFrom: string[]
 }
 
 export interface PluginBinding {
@@ -29,7 +28,7 @@ export interface SwarmTest {
 export interface SwarmDefinition {
   agents: AgentDefinition[]
   routes: Route[]
-  externalChannels: ExternalChannel[]
+  pluginIngress: PluginIngress[]
   plugins: PluginBinding[]
   tests: SwarmTest[]
 }
@@ -43,7 +42,7 @@ export interface AgentSwarmView {
     self: boolean
     receives: string[]
     sendsTo: string[]
-    externalFacing: boolean
+    receivesFromPlugins: string[]
   }>
   routes: Route[]
   plugins: Array<{ id: string; command: string; mode: string }>
@@ -55,7 +54,7 @@ export function validateDefinition(definition: unknown): SwarmDefinition {
   const copy = structuredClone({
     agents: source.agents ?? [],
     routes: source.routes ?? [],
-    externalChannels: source.externalChannels ?? [],
+    pluginIngress: source.pluginIngress ?? [],
     plugins: source.plugins ?? [],
     tests: source.tests ?? [],
   })
@@ -79,13 +78,13 @@ export function validateDefinition(definition: unknown): SwarmDefinition {
     }
     pluginIds.add(plugin.id)
   }
-  for (const channel of copy.externalChannels) {
-    if (!pluginIds.has(channel.plugin) || !ids.has(channel.ingressTo)) {
-      throw new Error("External channel requires a Plugin and existing ingress Agent")
+  const ingressPlugins = new Set<string>()
+  for (const ingress of copy.pluginIngress) {
+    if (!pluginIds.has(ingress.plugin) || !ids.has(ingress.ingressTo)) {
+      throw new Error("Plugin ingress requires a Plugin and existing Agent")
     }
-    if (!Array.isArray(channel.egressFrom) || channel.egressFrom.some((agentId) => !ids.has(agentId))) {
-      throw new Error("External channel egress Agents must exist")
-    }
+    if (ingressPlugins.has(ingress.plugin)) throw new Error(`duplicate Plugin ingress: ${ingress.plugin}`)
+    ingressPlugins.add(ingress.plugin)
   }
   for (const test of copy.tests) {
     if (!test.id || !Array.isArray(test.inputEvents) || test.inputEvents.length === 0) {
@@ -119,9 +118,9 @@ export function projectAgentSwarmView(
       self: agent.id === self,
       receives: definition.routes.filter((route) => route.to === agent.id).map((route) => route.from),
       sendsTo: definition.routes.filter((route) => route.from === agent.id).map((route) => route.to),
-      externalFacing: definition.externalChannels.some(
-        (channel) => channel.ingressTo === agent.id || channel.egressFrom.includes(agent.id),
-      ),
+      receivesFromPlugins: definition.pluginIngress
+        .filter((ingress) => ingress.ingressTo === agent.id)
+        .map((ingress) => ingress.plugin),
     })),
     routes: definition.routes,
     plugins: pluginBindings
