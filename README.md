@@ -49,9 +49,10 @@ See [docs/DESIGN.md](docs/DESIGN.md).
 ## Snapshots
 
 A Snapshot contains the complete Swarm Definition plus the seed workspace tree
-for every Agent. Definitions include each Agent's role and initial context, and
-an Agent may propose a modified complete Definition through the normal
-human-gated revision lifecycle.
+for every Agent. Agent responsibilities, instructions, and initial context live
+inside that Agent's workspace, where the Agent can change them through ordinary
+Git commits. An Agent may separately propose a modified complete Swarm
+Definition through the normal human-gated revision lifecycle.
 
 `snapshots/continual-harness/` is a small Actor–Refiner example inspired by the
 Continual Harness pattern. It is a Corallum blueprint, not a vendored copy or a

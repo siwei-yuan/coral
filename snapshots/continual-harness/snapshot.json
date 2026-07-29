@@ -6,23 +6,11 @@
     "agents": [
       {
         "id": "actor",
-        "harness": "codex",
-        "role": "Solve incoming tasks and record high-level completion results.",
-        "context": [
-          "Work from committed task Events.",
-          "Improve only the actor workspace.",
-          "Emit task.completed with inspectable result evidence."
-        ]
+        "harness": "codex"
       },
       {
         "id": "refiner",
-        "harness": "codex",
-        "role": "Review Actor outcomes and propose evidence-backed improvements.",
-        "context": [
-          "Use high-level task and completion Events as the refinement window.",
-          "Suggest changes to the Actor through Communication Events.",
-          "Propose a new complete Swarm Definition when Swarm-level change is justified."
-        ]
+        "harness": "codex"
       }
     ],
     "routes": [

@@ -3,7 +3,7 @@ import test from "node:test"
 import { createFixture } from "../test-support/fixture.js"
 
 test("Agent workspace commits remain draft history until an explicit Proposal", async (t) => {
-  const { swarm, ledger, adapter, revision, initial } = await createFixture(t)
+  const { swarm, ledger, workspaces, adapter, revision, initial } = await createFixture(t)
   const input = swarm.appendInput({
     type: "improvement.requested",
     actor: "external/user",
@@ -18,8 +18,11 @@ test("Agent workspace commits remain draft history until an explicit Proposal", 
   assert.equal(swarm.draftHead("builder"), turn.revision.commit)
   assert.equal(turn.workspaceEvent.type, "agent.workspace.committed")
   assert.equal(turn.turnEvent.type, "agent.turn.recorded")
-  assert.equal(adapter.runs[0].role, revision.definition.agents[0].role)
-  assert.deepEqual(adapter.runs[0].context, revision.definition.agents[0].context)
+  assert.match(adapter.runs[0].instructions, /Own this workspace/)
+  assert.match(adapter.runs[0].initialContext, /Build and improve/)
+  assert.match(await workspaces.read("builder", turn.revision.commit, "AGENTS.md"), /Evolved responsibility/)
+  assert.match(await workspaces.read("builder", turn.revision.commit, "context/initial.md"), /prior Events/)
+  assert.doesNotMatch(await workspaces.read("builder", initial.commit, "AGENTS.md"), /Evolved responsibility/)
   assert.equal(ledger.all().some((event) => event.type === "swarm.revision.proposed"), false)
   assert.equal(ledger.verify(), true)
 })
@@ -32,8 +35,7 @@ test("one Proposal creates isolated complete Forks with the same tests and input
     data: { goal: "find the best independently evolved Swarm" },
   })
   const proposedDefinition = structuredClone(definition)
-  proposedDefinition.agents[0].role = "Build, evaluate, and improve the requested behavior."
-  proposedDefinition.agents[0].context.push("Treat this Proposal as an isolated evolution cycle.")
+  proposedDefinition.routes.push({ on: "review.requested", to: "builder" })
   const proposal = swarm.propose({
     authoredBy: "builder",
     definition: proposedDefinition,
@@ -43,8 +45,8 @@ test("one Proposal creates isolated complete Forks with the same tests and input
   const second = swarm.createFork(proposal.id)
 
   assert.deepEqual(first.definition.tests, second.definition.tests)
-  assert.equal(proposal.definition.agents[0].role, proposedDefinition.agents[0].role)
-  assert.notEqual(swarm.activeRevision().definition.agents[0].role, proposedDefinition.agents[0].role)
+  assert.equal(proposal.definition.routes.some((route) => route.on === "review.requested"), true)
+  assert.equal(swarm.activeRevision().definition.routes.some((route) => route.on === "review.requested"), false)
   assert.deepEqual(first.agentHeads, second.agentHeads)
   assert.equal(first.pluginBindings[0].mode, "mock")
   assert.equal(second.pluginBindings[0].mode, "mock")

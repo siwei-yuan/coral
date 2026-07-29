@@ -7,10 +7,10 @@ Agent owns a Git workspace through which it controls context, instructions,
 memory, skills, code, and tests. Swarm composes Agents, routing, pinned tests,
 Plugins, Proposals, Forks, evaluation, Human Decisions, and activation.
 
-Every Agent entry in `SwarmDefinition` declares its Harness, role, and ordered
-initial context. These fields initialize the Agent's responsibility and the
-context supplied to its Harness; longer-lived, self-edited material belongs in
-the Agent's workspace.
+An Agent entry in `SwarmDefinition` declares only Swarm-level binding such as
+identity and Harness. The Agent's responsibility, instructions, and initial
+context live in its seed workspace, normally in `AGENTS.md` and `context/`.
+This keeps every part of the Agent's editable self in the same Git history.
 
 The Ledger is a high-level causal spine. It records Communication, one Event per
 logical Agent turn, workspace commits, and Swarm evolution. Native tool calls,
@@ -43,8 +43,12 @@ Revision. A Human Decision targets that exact Candidate. Only approval may move
 the active revision pointer, and only if the expected base is still active.
 
 An Agent may author a modified complete `SwarmDefinition`, including Agent
-roles, initial context, routes, tests, and Plugin bindings. This is proposal
-authority, never authority to mutate the active Definition in place.
+composition, Harness bindings, routes, tests, and Plugin bindings. This is
+proposal authority, never authority to mutate the active Definition in place.
+
+An Agent changes its own responsibility or context by editing its workspace.
+That produces a workspace commit, not a Definition mutation. The commit becomes
+active only when a later Swarm Revision pins and activates it.
 
 ## Plugins
 
@@ -68,6 +72,9 @@ agents/<agent-id>/...
 `snapshot.json` contains the complete Definition and source revision evidence;
 each Agent directory contains its seed workspace tree. Import initializes new
 Agent Git repositories and returns the Definition plus their initial heads.
+
+The Snapshot as a whole therefore initializes Agent roles and context even
+though those fields are not duplicated inside `SwarmDefinition`.
 
 A Snapshot intentionally excludes live Harness sessions, runtime queues,
 secrets, Plugin connections, and low-level trajectories. It is a reusable

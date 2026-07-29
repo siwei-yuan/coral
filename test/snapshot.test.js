@@ -26,11 +26,13 @@ test("a Snapshot round-trips the complete Definition and Agent workspace seeds",
 
   assert.deepEqual(imported.definition, revision.definition)
   assert.equal(imported.manifest.source.revisionId, revision.id)
-  assert.equal(imported.definition.agents[0].role, revision.definition.agents[0].role)
-  assert.deepEqual(imported.definition.agents[0].context, revision.definition.agents[0].context)
   assert.equal(
     await importedWorkspaces.read("builder", imported.agentHeads.builder, "AGENTS.md"),
     await workspaces.read("builder", agentHeads.builder, "AGENTS.md"),
+  )
+  assert.equal(
+    await importedWorkspaces.read("builder", imported.agentHeads.builder, "context/initial.md"),
+    await workspaces.read("builder", agentHeads.builder, "context/initial.md"),
   )
 })
 
@@ -45,6 +47,13 @@ test("the bundled Continual Harness snapshot is a bootstrappable Actor-Refiner S
     imported.definition.agents.map((agent) => agent.id),
     ["actor", "refiner"],
   )
-  assert.equal(imported.definition.agents[1].role.includes("propose"), true)
   assert.equal(Object.keys(imported.agentHeads).length, 2)
+  assert.match(
+    await workspaces.read("refiner", imported.agentHeads.refiner, "AGENTS.md"),
+    /author a complete candidate `SwarmDefinition`/,
+  )
+  assert.match(
+    await workspaces.read("refiner", imported.agentHeads.refiner, "context/README.md"),
+    /refinement window/,
+  )
 })

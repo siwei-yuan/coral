@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { AgentRuntime, GitWorkspaceStore, Ledger, Swarm } from "../src/index.js"
@@ -10,20 +10,14 @@ export async function createFixture(t) {
   const workspaces = new GitWorkspaceStore(join(root, "workspaces"))
   const initial = await workspaces.initialize("builder", {
     "AGENTS.md": "Own this workspace. Improve it only from committed high-level Events.\n",
+    "context/initial.md": "Build and improve the requested behavior.\n",
   })
   const ledger = new Ledger()
   const adapter = new ScriptedHarnessAdapter()
   const agentRuntime = new AgentRuntime({ ledger, workspaces, adapters: [adapter] })
   const swarm = new Swarm({ ledger, agentRuntime, workspaces })
   const definition = {
-    agents: [
-      {
-        id: "builder",
-        harness: "scripted",
-        role: "Build and improve the requested behavior.",
-        context: ["Own only the builder workspace.", "Emit high-level result Events."],
-      },
-    ],
+    agents: [{ id: "builder", harness: "scripted" }],
     routes: [{ on: "test.requested", to: "builder" }],
     externalChannels: [{ plugin: "chat", ingressTo: "builder", egressFrom: ["builder"] }],
     plugins: [{ id: "chat", version: "1", digest: "chat-v1", mode: "live" }],
@@ -47,8 +41,15 @@ class ScriptedHarnessAdapter {
   id = "scripted"
   runs = []
 
-  async run({ turnId, role, context, scope, workingDirectory, inputEvents }) {
-    this.runs.push({ role, context })
+  async run({ turnId, scope, workingDirectory, inputEvents }) {
+    this.runs.push({
+      instructions: await readFile(join(workingDirectory, "AGENTS.md"), "utf8"),
+      initialContext: await readFile(join(workingDirectory, "context", "initial.md"), "utf8"),
+    })
+    if (inputEvents[0].type === "improvement.requested") {
+      await appendFile(join(workingDirectory, "AGENTS.md"), "Evolved responsibility: verify the result.\n")
+      await appendFile(join(workingDirectory, "context", "initial.md"), "Use evidence from prior Events.\n")
+    }
     await mkdir(join(workingDirectory, "memory"), { recursive: true })
     const identity = scope.kind === "fork" ? scope.forkId : "agent-draft"
     await writeFile(join(workingDirectory, "memory", "last-run.txt"), `${identity}\n`, "utf8")
