@@ -2,8 +2,14 @@ import { randomUUID } from "node:crypto"
 import type { HarnessAdapter, HarnessEmission } from "../../harness/adapter.ts"
 import type { AgentDefinition } from "./definition.ts"
 import { WorkspaceBridge } from "../workspace/context-bridge.ts"
-import type { GitWorkspaceStore, WorkspaceRevision } from "../workspace/git-workspace.ts"
+import type {
+  GitWorkspaceStore,
+  WorkspaceFiles,
+  WorkspaceReapplyResult,
+  WorkspaceRevision,
+} from "../workspace/git-workspace.ts"
 import type { Ledger, LedgerEvent, Scope } from "../ledger/ledger.ts"
+import { activeScope } from "../ledger/ledger.ts"
 
 export interface AgentTurnInput {
   agent: AgentDefinition
@@ -41,6 +47,48 @@ export class AgentRuntime {
     this.workspaces = workspaces
     this.adapters = new Map(adapters.map((adapter) => [adapter.id, adapter]))
     this.workspaceBridge = workspaceBridge
+  }
+
+  async initializeWorkspace(agentId: string, files: WorkspaceFiles = {}): Promise<WorkspaceRevision> {
+    const revision = await this.workspaces.initialize(agentId, files)
+    this.ledger.append({
+      type: "agent.workspace.initialized",
+      actor: "workspace/runtime",
+      scope: activeScope(),
+      data: { agentId, commit: revision.commit, tree: revision.tree },
+    })
+    return revision
+  }
+
+  async assertWorkspaceCommit(agentId: string, commit: string, initial = false): Promise<WorkspaceRevision> {
+    const revision = await this.workspaces.verify(agentId, commit)
+    if (initial && !(await this.workspaces.isRoot(agentId, commit))) {
+      throw new Error(`Agent workspace must start from its initial commit: ${agentId}`)
+    }
+    if (initial && !this.#initializationEvent(agentId, commit)) {
+      throw new Error(`Agent workspace initial commit has no Ledger Event: ${agentId}`)
+    }
+    return revision
+  }
+
+  initializationEvent(agentId: string, commit: string): LedgerEvent {
+    const event = this.#initializationEvent(agentId, commit)
+    if (!event) throw new Error(`unknown Agent workspace initialization: ${agentId}`)
+    return event
+  }
+
+  async reapplyWorkspaceTail(
+    agentId: string,
+    baseCommit: string,
+    currentHead: string,
+    targetHead: string,
+    operationId: string,
+  ): Promise<WorkspaceReapplyResult> {
+    return this.workspaces.reapplyTail(agentId, baseCommit, currentHead, targetHead, operationId)
+  }
+
+  async retainWorkspaceHead(agentId: string, key: string, commit: string): Promise<void> {
+    await this.workspaces.retain(agentId, key, commit)
   }
 
   async runTurn({ agent, baseCommit, scope, inputEvents, runtimeContext = {} }: AgentTurnInput): Promise<AgentTurnResult> {
@@ -133,5 +181,13 @@ export class AgentRuntime {
     } finally {
       await this.workspaces.close(checkout)
     }
+  }
+
+  #initializationEvent(agentId: string, commit: string): LedgerEvent | undefined {
+    return this.ledger.all().find((event) => {
+      if (event.type !== "agent.workspace.initialized") return false
+      const data = event.data as { agentId?: unknown; commit?: unknown }
+      return data.agentId === agentId && data.commit === commit
+    })
   }
 }

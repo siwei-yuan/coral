@@ -39,7 +39,7 @@ test("a workspace commit immediately changes the Agent's next turn without a Swa
   assert.equal(ledger.verify(), true)
 })
 
-test("a Revision aggregates Agent commits and Forks can start from any Revision or Proposal", async (t) => {
+test("a Revision snapshots Agent commits and Forks can start from any Revision or Proposal", async (t) => {
   const { swarm, ledger, definition, revision } = await createFixture(t)
   for (const request of ["improve context", "improve memory"]) {
     const input = swarm.appendInput({ type: "improvement.requested", actor: "external/user", data: { request } })
@@ -58,7 +58,11 @@ test("a Revision aggregates Agent commits and Forks can start from any Revision 
   })
   const proposedDefinition = structuredClone(definition)
   proposedDefinition.routes.push({ on: "review.completed", to: "builder" })
-  const proposal = swarm.propose({ authoredBy: "builder", definition: proposedDefinition, reasonEventIds: [reason.id] })
+  const proposal = await swarm.propose({
+    authoredBy: "builder",
+    definition: proposedDefinition,
+    reasonEventIds: [reason.id],
+  })
   const first = swarm.createFork(proposal.id)
   const second = swarm.createFork(proposal.id)
 
@@ -95,12 +99,13 @@ test("a Revision aggregates Agent commits and Forks can start from any Revision 
   assert.equal(candidate.workspaceCommits.builder?.length, 3)
   assert.equal(candidate.workspaceCommits.reviewer?.length, 1)
   assert.equal(candidate.pluginBindings[0]?.mode, "live")
-  assert.throws(() => swarm.approveAndActivate(candidate.id, "agent/builder"), /Human principal/)
+  await assert.rejects(swarm.approveAndActivate(candidate.id, "agent/builder"), /Human principal/)
   const candidateFork = swarm.createFork(candidate.id)
   assert.equal(candidateFork.sourceKind, "revision")
   assert.equal((await swarm.runFork(candidateFork.id)).results?.[0]?.passed, true)
 
-  swarm.approveAndActivate(candidate.id, "reviewer")
+  await swarm.approveAndActivate(candidate.id, "reviewer")
+  assert.equal(swarm.fork(first.id).status, "promoted")
   const historical = swarm.createFork(revision.id)
   const oldProposal = swarm.createFork(proposal.id)
   assert.equal(historical.agentHeads.builder, revision.agentHeads.builder)
@@ -108,4 +113,95 @@ test("a Revision aggregates Agent commits and Forks can start from any Revision 
   assert.equal(historicalResult?.results?.[0]?.passed, true)
   assert.equal(oldProposalResult?.results?.[0]?.passed, true)
   assert.equal(ledger.verify(), true)
+})
+
+test("the selected Fork becomes Main and later Main workspace commits continue after its Revision snapshot", async (t) => {
+  const { swarm, ledger, workspaces, revision } = await createFixture(t)
+  const reason = swarm.appendInput({
+    type: "evolution.requested",
+    actor: "external/user",
+    data: { goal: "evaluate a new Swarm snapshot" },
+  })
+  const proposal = await swarm.propose({ authoredBy: "builder", reasonEventIds: [reason.id] })
+  const fork = swarm.createFork(proposal.id)
+  const evaluated = await swarm.runFork(fork.id)
+  swarm.selectFork({ proposalId: proposal.id, forkId: fork.id, selectedBy: "agent/builder" })
+  const candidate = swarm.freezeCandidate(proposal.id)
+
+  const continued = swarm.appendInput({
+    type: "main-tail.requested",
+    actor: "external/user",
+    data: { request: "continue evolving while the Proposal is evaluated" },
+  })
+  const tail = await swarm.runAgentTurn({ agentId: "builder", inputEventId: continued.id })
+  const oldMainHead = tail.revision.commit
+
+  await swarm.approveAndActivate(candidate.id, "owner")
+
+  const newMainHead = swarm.agentHead("builder")
+  assert.equal(swarm.activeRevision().id, candidate.id)
+  assert.equal(candidate.agentHeads.builder, evaluated.agentHeads.builder)
+  assert.notEqual(newMainHead, candidate.agentHeads.builder)
+  assert.notEqual(newMainHead, oldMainHead)
+  assert.match(await workspaces.read("builder", newMainHead, "memory/last-run.txt"), new RegExp(fork.id))
+  assert.match(await workspaces.read("builder", newMainHead, "memory/main-tail.txt"), /continued on Main/)
+  assert.equal(swarm.fork(fork.id).status, "promoted")
+
+  const activation = ledger.all().find(
+    (event) => event.type === "swarm.revision.activated" && event.swarmRevision === candidate.id,
+  )
+  assert.ok(activation)
+  const activationData = activation.data as {
+    promotedForkId: string
+    workspaceHeads: Record<string, string>
+    reappliedCommits: Record<string, Array<{ sourceCommit: string; appliedCommit: string }>>
+  }
+  assert.equal(activationData.promotedForkId, fork.id)
+  assert.equal(activationData.workspaceHeads.builder, newMainHead)
+  assert.equal(activationData.reappliedCommits.builder?.[0]?.sourceCommit, oldMainHead)
+  assert.equal(activationData.reappliedCommits.builder?.[0]?.appliedCommit, newMainHead)
+  assert.equal(candidate.parentRevision, revision.id)
+
+  const nextReason = swarm.appendInput({
+    type: "evolution.requested",
+    actor: "external/user",
+    data: { goal: "snapshot the continued Main" },
+  })
+  const nextProposal = await swarm.propose({ authoredBy: "builder", reasonEventIds: [nextReason.id] })
+  assert.equal(nextProposal.agentHeads.builder, newMainHead)
+  assert.equal(nextProposal.workspaceCommits.builder?.at(-1)?.commit, newMainHead)
+})
+
+test("a workspace conflict leaves the old Main intact", async (t) => {
+  const { swarm, ledger, revision } = await createFixture(t)
+  const reason = swarm.appendInput({
+    type: "evolution.requested",
+    actor: "external/user",
+    data: { goal: "evaluate a conflicting Swarm snapshot" },
+  })
+  const proposal = await swarm.propose({ authoredBy: "builder", reasonEventIds: [reason.id] })
+  const fork = swarm.createFork(proposal.id)
+  await swarm.runFork(fork.id)
+  swarm.selectFork({ proposalId: proposal.id, forkId: fork.id, selectedBy: "agent/builder" })
+  const candidate = swarm.freezeCandidate(proposal.id)
+
+  const continued = swarm.appendInput({
+    type: "test.requested",
+    actor: "external/user",
+    data: { request: "write the same Main workspace file differently" },
+  })
+  const tail = await swarm.runAgentTurn({ agentId: "builder", inputEventId: continued.id })
+
+  await assert.rejects(swarm.approveAndActivate(candidate.id, "owner"), /Cannot reapply workspace commit/)
+  assert.equal(swarm.activeRevision().id, revision.id)
+  assert.equal(swarm.agentHead("builder"), tail.revision.commit)
+  assert.equal(swarm.fork(fork.id).status, "completed")
+  assert.equal(
+    ledger.all().some(
+      (event) =>
+        event.type === "swarm.decision.recorded" &&
+        (event.data as { candidateRevisionId?: string }).candidateRevisionId === candidate.id,
+    ),
+    false,
+  )
 })

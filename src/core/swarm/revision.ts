@@ -4,7 +4,7 @@ import type { PluginBinding, SwarmDefinition } from "./definition.ts"
 
 export interface WorkspaceCommitRef {
   commit: string
-  eventId: string | null
+  eventId: string
 }
 
 export interface SwarmRevision {
@@ -50,7 +50,7 @@ export interface ForkSnapshot {
   agentHeads: Record<string, string>
   pluginBindings: PluginBinding[]
   scope: Scope
-  status: "running" | "completed"
+  status: "running" | "completed" | "promoted"
   createdEventId: string
   evaluationEventId: string | null
   results: ForkResult[] | null
@@ -85,15 +85,30 @@ export function proposalWorkspaceCommits(
   definition: SwarmDefinition,
   heads: Record<string, string>,
   events: LedgerEvent[],
+  afterSeq: number,
 ): Record<string, WorkspaceCommitRef[]> {
-  const commits = collectWorkspaceCommits(events, base.ledgerFrontier, { kind: "active" })
+  const commits = collectWorkspaceCommits(events, afterSeq, { kind: "active" })
+  const relevantAgents = new Set([
+    ...base.definition.agents.map((agent) => agent.id),
+    ...definition.agents.map((agent) => agent.id),
+  ])
+  for (const agentId of Object.keys(commits)) {
+    if (!relevantAgents.has(agentId)) delete commits[agentId]
+  }
 
   for (const agent of definition.agents) {
     const baseHead = base.agentHeads[agent.id]
     if (!baseHead) {
       const agentCommits = commits[agent.id] ?? []
       commits[agent.id] = agentCommits
-      agentCommits.push({ commit: heads[agent.id]!, eventId: null })
+      if (agentCommits.some((item) => item.commit === heads[agent.id])) continue
+      const initialization = events.find((event) => {
+        if (event.type !== "agent.workspace.initialized") return false
+        const data = event.data as { agentId?: unknown; commit?: unknown }
+        return data.agentId === agent.id && data.commit === heads[agent.id]
+      })
+      if (!initialization) throw new Error(`New Agent head has no workspace initialization Event: ${agent.id}`)
+      agentCommits.push({ commit: heads[agent.id]!, eventId: initialization.id })
       continue
     }
     if (heads[agent.id] !== baseHead && commits[agent.id]?.at(-1)?.commit !== heads[agent.id]) {
@@ -110,7 +125,13 @@ export function collectWorkspaceCommits(
 ): Record<string, WorkspaceCommitRef[]> {
   const commits: Record<string, WorkspaceCommitRef[]> = {}
   for (const event of events) {
-    if (event.seq <= afterSeq || event.type !== "agent.workspace.committed" || !sameScope(event.scope, scope)) {
+    if (
+      event.seq <= afterSeq ||
+      (event.type !== "agent.workspace.initialized" &&
+        event.type !== "agent.workspace.committed" &&
+        event.type !== "agent.workspace.reapplied") ||
+      !sameScope(event.scope, scope)
+    ) {
       continue
     }
     const data = event.data as { agentId?: unknown; commit?: unknown }

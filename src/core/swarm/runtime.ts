@@ -28,7 +28,7 @@ interface BootstrapInput {
 interface ProposalInput {
   authoredBy: string
   definition?: SwarmDefinition
-  agentHeads?: Record<string, string>
+  addedAgentHeads?: Record<string, string>
   reasonEventIds: string[]
 }
 
@@ -47,6 +47,7 @@ export class Swarm {
   #selections = new Map<string, Selection>()
   #agentHeads = new Map<string, string>()
   #activeRevisionId: string | null = null
+  #mainOperations: Promise<unknown> = Promise.resolve()
 
   readonly ledger: Ledger
   readonly agentRuntime: AgentRuntime
@@ -56,11 +57,14 @@ export class Swarm {
     this.agentRuntime = agentRuntime
   }
 
-  bootstrap({ definition, agentHeads, human }: BootstrapInput): SwarmRevision {
+  async bootstrap({ definition, agentHeads, human }: BootstrapInput): Promise<SwarmRevision> {
     if (this.#activeRevisionId) throw new Error("Swarm is already bootstrapped")
     assertHuman(human)
     const checkedDefinition = validateDefinition(definition)
     assertCompleteHeads(checkedDefinition, agentHeads)
+    await Promise.all(
+      checkedDefinition.agents.map((agent) => this.agentRuntime.assertWorkspaceCommit(agent.id, agentHeads[agent.id]!, true)),
+    )
 
     const body = {
       parentRevision: null,
@@ -70,7 +74,15 @@ export class Swarm {
       definitionDigest: digest(checkedDefinition),
       agentHeads: { ...agentHeads },
       workspaceCommits: Object.fromEntries(
-        checkedDefinition.agents.map((agent) => [agent.id, [{ commit: agentHeads[agent.id]!, eventId: null }]]),
+        checkedDefinition.agents.map((agent) => [
+          agent.id,
+          [
+            {
+              commit: agentHeads[agent.id]!,
+              eventId: this.agentRuntime.initializationEvent(agent.id, agentHeads[agent.id]!).id,
+            },
+          ],
+        ]),
       ),
       pluginBindings: checkedDefinition.plugins,
       evaluationEventIds: [] as string[],
@@ -159,7 +171,11 @@ export class Swarm {
     return plugin
   }
 
-  async runAgentTurn({ agentId, inputEventId }: { agentId: string; inputEventId: string }): Promise<AgentTurnResult> {
+  async runAgentTurn(input: { agentId: string; inputEventId: string }): Promise<AgentTurnResult> {
+    return this.#withMain(() => this.#runAgentTurn(input))
+  }
+
+  async #runAgentTurn({ agentId, inputEventId }: { agentId: string; inputEventId: string }): Promise<AgentTurnResult> {
     const revision = this.activeRevision()
     const agent = findAgent(revision.definition, agentId)
     const input = this.ledger.get(inputEventId)
@@ -184,7 +200,16 @@ export class Swarm {
     return result
   }
 
-  propose({ authoredBy, definition = this.activeRevision().definition, agentHeads, reasonEventIds }: ProposalInput): SwarmProposal {
+  async propose(input: ProposalInput): Promise<SwarmProposal> {
+    return this.#withMain(() => this.#propose(input))
+  }
+
+  async #propose({
+    authoredBy,
+    definition = this.activeRevision().definition,
+    addedAgentHeads = {},
+    reasonEventIds,
+  }: ProposalInput): Promise<SwarmProposal> {
     const base = this.activeRevision()
     findAgent(base.definition, authoredBy)
     if (!Array.isArray(reasonEventIds) || reasonEventIds.length === 0) {
@@ -192,10 +217,26 @@ export class Swarm {
     }
     const checkedDefinition = validateDefinition(definition)
     if (checkedDefinition.tests.length === 0) throw new Error("Proposal requires pinned tests and test inputs")
-    const heads =
-      agentHeads ??
-      Object.fromEntries(checkedDefinition.agents.map((agent) => [agent.id, this.agentHead(agent.id)]))
+    const existingAgentIds = new Set(base.definition.agents.map((agent) => agent.id))
+    const addedAgentIds = checkedDefinition.agents
+      .filter((agent) => !existingAgentIds.has(agent.id))
+      .map((agent) => agent.id)
+      .sort()
+    if (JSON.stringify(Object.keys(addedAgentHeads).sort()) !== JSON.stringify(addedAgentIds)) {
+      throw new Error("Initial heads must exactly match the Agents added by the Proposal")
+    }
+    const heads = Object.fromEntries(
+      checkedDefinition.agents.map((agent) => [
+        agent.id,
+        existingAgentIds.has(agent.id) ? this.agentHead(agent.id) : addedAgentHeads[agent.id]!,
+      ]),
+    )
     assertCompleteHeads(checkedDefinition, heads)
+    await Promise.all(
+      checkedDefinition.agents.map((agent) =>
+        this.agentRuntime.assertWorkspaceCommit(agent.id, heads[agent.id]!, !existingAgentIds.has(agent.id)),
+      ),
+    )
     for (const eventId of reasonEventIds) {
       const event = this.ledger.get(eventId)
       if (event.scope.kind !== "active") throw new Error("Proposal reasons must be active-scoped Events")
@@ -207,7 +248,13 @@ export class Swarm {
       reasonEventIds: [...reasonEventIds],
       definition: checkedDefinition,
       agentHeads: { ...heads },
-      workspaceCommits: proposalWorkspaceCommits(base, checkedDefinition, heads, this.ledger.all()),
+      workspaceCommits: proposalWorkspaceCommits(
+        base,
+        checkedDefinition,
+        heads,
+        this.ledger.all(),
+        base.proposalId ? this.proposal(base.proposalId).ledgerFrontier : base.ledgerFrontier,
+      ),
       pluginBindings: checkedDefinition.plugins,
       testDigest: digest(checkedDefinition.tests),
       ledgerFrontier: this.ledger.head().seq + 1,
@@ -378,13 +425,53 @@ export class Swarm {
     return candidate
   }
 
-  approveAndActivate(candidateId: string, human: string): SwarmRevision {
+  async approveAndActivate(candidateId: string, human: string): Promise<SwarmRevision> {
+    return this.#withMain(() => this.#approveAndActivate(candidateId, human))
+  }
+
+  async #approveAndActivate(candidateId: string, human: string): Promise<SwarmRevision> {
     assertHuman(human)
     const candidate = this.#candidates.get(candidateId)
     if (!candidate) throw new Error(`unknown Candidate: ${candidateId}`)
     if (this.#activeRevisionId !== candidate.parentRevision) {
       throw new Error("Candidate is stale: active revision no longer matches its base")
     }
+    const proposal = this.proposal(candidate.proposalId!)
+    const selectedFork = this.#mutableFork(candidate.selectedForkId!)
+    if (selectedFork.status !== "completed") throw new Error("Selected Fork is not ready for promotion")
+
+    const nextHeads: Record<string, string> = {}
+    const reappliedCommits: Record<string, Array<{ sourceCommit: string; appliedCommit: string }>> = {}
+    for (const agent of candidate.definition.agents) {
+      const candidateHead = candidate.agentHeads[agent.id]!
+      const proposalHead = proposal.agentHeads[agent.id]
+      const currentHead = this.#agentHeads.get(agent.id)
+      if (!currentHead) {
+        if (!proposalHead) throw new Error(`Proposal has no workspace head: ${agent.id}`)
+        await this.agentRuntime.assertWorkspaceCommit(agent.id, candidateHead)
+        nextHeads[agent.id] = candidateHead
+        continue
+      }
+      if (!proposalHead) throw new Error(`Proposal has no workspace head: ${agent.id}`)
+      const result = await this.agentRuntime.reapplyWorkspaceTail(
+        agent.id,
+        proposalHead,
+        currentHead,
+        candidateHead,
+        `activation/${candidate.id}/${agent.id}`,
+      )
+      nextHeads[agent.id] = result.revision.commit
+      if (result.commits.length > 0) reappliedCommits[agent.id] = result.commits
+    }
+
+    await Promise.all(
+      Object.entries(nextHeads).map(([agentId, head]) =>
+        this.agentRuntime.retainWorkspaceHead(agentId, `activation/${candidate.id}`, head),
+      ),
+    )
+    const removedAgentHeads = Object.fromEntries(
+      [...this.#agentHeads].filter(([agentId]) => !(agentId in nextHeads)),
+    )
     const decision = this.ledger.append({
       type: "swarm.decision.recorded",
       actor: `human/${human}`,
@@ -392,18 +479,48 @@ export class Swarm {
       causation: [candidate.frozenEventId],
       data: { candidateRevisionId: candidate.id, verdict: "approved" },
     })
+    const reappliedEventIds: string[] = []
+    for (const [agentId, commits] of Object.entries(reappliedCommits)) {
+      let parentCommit = candidate.agentHeads[agentId]!
+      for (const commit of commits) {
+        const event = this.ledger.append({
+          type: "agent.workspace.reapplied",
+          actor: "swarm/runtime",
+          scope: activeScope(),
+          causation: [decision.id],
+          swarmRevision: candidate.id,
+          data: {
+            agentId,
+            sourceCommit: commit.sourceCommit,
+            parentCommit,
+            commit: commit.appliedCommit,
+          },
+        })
+        reappliedEventIds.push(event.id)
+        parentCommit = commit.appliedCommit
+      }
+    }
     this.ledger.append({
       type: "swarm.revision.activated",
       actor: "swarm/runtime",
       scope: activeScope(),
-      causation: [decision.id],
+      causation: [decision.id, ...reappliedEventIds],
       swarmRevision: candidate.id,
-      data: { previousRevisionId: candidate.parentRevision, revisionId: candidate.id },
+      data: {
+        previousRevisionId: candidate.parentRevision,
+        revisionId: candidate.id,
+        promotedForkId: selectedFork.id,
+        workspaceHeads: nextHeads,
+        reappliedCommits,
+        removedAgentHeads,
+      },
     })
     this.#revisions.set(candidate.id, candidate)
+    this.#candidates.delete(candidate.id)
     this.#activeRevisionId = candidate.id
     this.#agentHeads.clear()
-    for (const [agentId, head] of Object.entries(candidate.agentHeads)) this.#agentHeads.set(agentId, head)
+    for (const [agentId, head] of Object.entries(nextHeads)) this.#agentHeads.set(agentId, head)
+    selectedFork.status = "promoted"
     return candidate
   }
 
@@ -489,6 +606,15 @@ export class Swarm {
       }
     }
     throw new Error(`unknown Fork source: ${id}`)
+  }
+
+  #withMain<T>(operation: () => Promise<T>): Promise<T> {
+    const current = this.#mainOperations.then(operation, operation)
+    this.#mainOperations = current.then(
+      () => undefined,
+      () => undefined,
+    )
+    return current
   }
 }
 

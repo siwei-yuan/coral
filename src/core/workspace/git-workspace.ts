@@ -16,6 +16,16 @@ export interface WorkspaceCheckout {
   baseCommit: string
 }
 
+export interface ReappliedWorkspaceCommit {
+  sourceCommit: string
+  appliedCommit: string
+}
+
+export interface WorkspaceReapplyResult {
+  revision: WorkspaceRevision
+  commits: ReappliedWorkspaceCommit[]
+}
+
 export type WorkspaceFiles = Record<string, string | Uint8Array>
 
 export class GitWorkspaceStore {
@@ -28,18 +38,83 @@ export class GitWorkspaceStore {
 
   async initialize(agentId: string, files: WorkspaceFiles = {}): Promise<WorkspaceRevision> {
     const repository = this.#repository(agentId)
-    await mkdir(repository, { recursive: true })
+    await mkdir(dirname(repository), { recursive: true })
+    await mkdir(repository)
     await git(repository, ["init", "-b", "main"])
-    await git(repository, ["config", "user.name", `Agent ${agentId}`])
-    await git(repository, ["config", "user.email", `${agentId}@swarm.local`])
+    await git(repository, ["config", "user.name", "Corallum Workspace"])
+    await git(repository, ["config", "user.email", "workspace@corallum.local"])
     for (const [path, content] of Object.entries(files)) {
       const target = safePath(repository, path)
       await mkdir(dirname(target), { recursive: true })
       await writeFile(target, content)
     }
     await git(repository, ["add", "-A"])
-    await git(repository, ["commit", "--allow-empty", "-m", "Initialize Agent workspace"])
+    await git(repository, ["commit", "--allow-empty", "-m", "Initialize workspace"])
     return this.revision(agentId, "HEAD")
+  }
+
+  async verify(agentId: string, commit: string): Promise<WorkspaceRevision> {
+    assertCommitId(commit)
+    const revision = await this.revision(agentId, `${commit}^{commit}`)
+    if (revision.commit !== commit) throw new Error(`unknown workspace commit for Agent ${agentId}: ${commit}`)
+    return revision
+  }
+
+  async isRoot(agentId: string, commit: string): Promise<boolean> {
+    await this.verify(agentId, commit)
+    const line = (await git(this.#repository(agentId), ["rev-list", "--parents", "-n", "1", commit])).trim()
+    return line.split(/\s+/).length === 1
+  }
+
+  async reapplyTail(
+    agentId: string,
+    baseCommit: string,
+    currentHead: string,
+    targetHead: string,
+    operationId: string,
+  ): Promise<WorkspaceReapplyResult> {
+    await Promise.all([
+      this.verify(agentId, baseCommit),
+      this.verify(agentId, currentHead),
+      this.verify(agentId, targetHead),
+    ])
+    if (!(await this.#isAncestor(agentId, baseCommit, currentHead))) {
+      throw new Error(`Main workspace head does not descend from Proposal head: ${agentId}`)
+    }
+    if (!(await this.#isAncestor(agentId, baseCommit, targetHead))) {
+      throw new Error(`Fork workspace head does not descend from Proposal head: ${agentId}`)
+    }
+    if (currentHead === baseCommit || currentHead === targetHead) {
+      return { revision: await this.verify(agentId, targetHead), commits: [] }
+    }
+    if (targetHead === baseCommit) {
+      return { revision: await this.verify(agentId, currentHead), commits: [] }
+    }
+
+    const commits = (await git(this.#repository(agentId), ["rev-list", "--reverse", `${baseCommit}..${currentHead}`]))
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+    const checkout = await this.open(agentId, targetHead, operationId)
+    const reapplied: ReappliedWorkspaceCommit[] = []
+    try {
+      for (const sourceCommit of commits) {
+        try {
+          await git(checkout.worktree, ["cherry-pick", sourceCommit], {
+            GIT_COMMITTER_NAME: "Corallum Runtime",
+            GIT_COMMITTER_EMAIL: "runtime@corallum.local",
+          })
+        } catch (error) {
+          await git(checkout.worktree, ["cherry-pick", "--abort"]).catch(() => undefined)
+          const message = error instanceof Error ? error.message : String(error)
+          throw new Error(`Cannot reapply workspace commit for Agent ${agentId}: ${sourceCommit}: ${message}`)
+        }
+        reapplied.push({ sourceCommit, appliedCommit: (await this.revision(agentId, "HEAD", checkout.worktree)).commit })
+      }
+      return { revision: await this.revision(agentId, "HEAD", checkout.worktree), commits: reapplied }
+    } finally {
+      await this.close(checkout)
+    }
   }
 
   async open(agentId: string, commit: string, runId: string): Promise<WorkspaceCheckout> {
@@ -119,6 +194,10 @@ export class GitWorkspaceStore {
     )
     return current
   }
+
+  async #isAncestor(agentId: string, ancestor: string, descendant: string): Promise<boolean> {
+    return gitSucceeds(this.#repository(agentId), ["merge-base", "--is-ancestor", ancestor, descendant])
+  }
 }
 
 async function git(cwd: string, args: string[], extraEnvironment: NodeJS.ProcessEnv = {}): Promise<string> {
@@ -144,6 +223,16 @@ async function gitBuffer(cwd: string, args: string[]): Promise<Buffer> {
   })
 }
 
+async function gitSucceeds(cwd: string, args: string[]): Promise<boolean> {
+  return new Promise((resolvePromise, rejectPromise) => {
+    execFile("git", ["-C", cwd, ...args], (error) => {
+      if (!error) resolvePromise(true)
+      else if (error.code === 1) resolvePromise(false)
+      else rejectPromise(error)
+    })
+  })
+}
+
 function safePath(root: string, path: string): string {
   assertRelativePath(path)
   const target = resolve(root, path)
@@ -155,4 +244,8 @@ function assertRelativePath(path: string): void {
   if (!path || isAbsolute(path) || path.split(/[\\/]/).includes("..")) {
     throw new Error(`invalid workspace path: ${path}`)
   }
+}
+
+function assertCommitId(commit: string): void {
+  if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(commit)) throw new Error(`invalid workspace commit: ${commit}`)
 }

@@ -20,14 +20,17 @@ export async function createFixture(t: TestContext) {
   t.after(() => rm(root, { recursive: true, force: true }))
 
   const workspaces = new GitWorkspaceStore(join(root, "workspaces"))
-  const initial = await workspaces.initialize("builder", workspaceSeed("Build and improve the requested behavior."))
-  const reviewerInitial = await workspaces.initialize(
-    "reviewer",
-    workspaceSeed("Review evidence and improve your own procedure."),
-  )
   const ledger = new Ledger()
   const adapter = new ScriptedHarnessAdapter()
   const agentRuntime = new AgentRuntime({ ledger, workspaces, adapters: [adapter] })
+  const initial = await agentRuntime.initializeWorkspace(
+    "builder",
+    workspaceSeed("Build and improve the requested behavior."),
+  )
+  const reviewerInitial = await agentRuntime.initializeWorkspace(
+    "reviewer",
+    workspaceSeed("Review evidence and improve your own procedure."),
+  )
   const swarm = new Swarm({ ledger, agentRuntime })
   const definition: SwarmDefinition = {
     agents: [
@@ -48,12 +51,12 @@ export async function createFixture(t: TestContext) {
       },
     ],
   }
-  const revision = swarm.bootstrap({
+  const revision = await swarm.bootstrap({
     definition,
     agentHeads: { builder: initial.commit, reviewer: reviewerInitial.commit },
     human: "owner",
   })
-  return { root, workspaces, ledger, adapter, swarm, definition, initial, reviewerInitial, revision }
+  return { root, workspaces, ledger, adapter, agentRuntime, swarm, definition, initial, reviewerInitial, revision }
 }
 
 export function workspaceSeed(initialContext: string): WorkspaceFiles {
@@ -119,8 +122,13 @@ class ScriptedHarnessAdapter implements HarnessAdapter {
       await writeFile(composerPath, composer.replace("composer:v1", "composer:v2"), "utf8")
     }
     await mkdir(join(workingDirectory, "memory"), { recursive: true })
+    if (inputEvents[0]?.type === "main-tail.requested") {
+      await writeFile(join(workingDirectory, "memory", "main-tail.txt"), "continued on Main\n", "utf8")
+    }
     const identity = scope.kind === "fork" ? scope.forkId : "agent"
-    await writeFile(join(workingDirectory, "memory", "last-run.txt"), `${identity}\n`, "utf8")
+    if (inputEvents[0]?.type !== "main-tail.requested") {
+      await writeFile(join(workingDirectory, "memory", "last-run.txt"), `${identity}\n`, "utf8")
+    }
     return {
       outcome: "completed",
       events: [{ type: "work.completed", data: { identity, input: inputEvents[0]?.data } }],

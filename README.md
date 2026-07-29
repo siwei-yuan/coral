@@ -14,8 +14,8 @@ The runtime has eight concepts:
 3. `WorkspaceBridge` runs the Agent-owned `context.ts` from that workspace.
 4. `HarnessAdapter` drives a native Agent Harness.
 5. `AgentRuntime` records one logical turn and any resulting workspace commit.
-6. `Swarm` implements Revision/Proposal-rooted parallel Forks, evaluation, Candidate
-   freeze, Human Decision, and atomic activation.
+6. `Swarm` snapshots Main as Revisions, creates isolated whole-Swarm Forks,
+   evaluates them, and promotes one selected Fork as the new Main after Human approval.
 7. Plugins adapt external protocols to Event ingress, Event egress, or Harness
    tools. `ChatPlugin` is the first reference boundary.
 8. `SnapshotStore` exports and imports complete reusable Swarm blueprints under
@@ -50,22 +50,28 @@ evolution protocol.
 ## Core lifecycle
 
 ```text
-Active Swarm
-  -> Revision Proposal, including tests, inputs, and Agent workspace commits
-  -> complete Swarm Forks from that Proposal or any past Revision
-  -> same Definition and inputs run independently in every Fork
+Main Swarm
+  -> Revision Proposal, including tests, inputs, and Agent workspace heads
+  -> isolated whole-Swarm Forks from that Proposal or any past Revision
   -> evaluate and select one Fork
-  -> freeze immutable Candidate Revision
+  -> freeze that Fork as an immutable Revision snapshot
   -> Human Decision
-  -> activate atomically
+  -> promote it atomically as the only Main
+  -> continue Proposal-later Main workspace commits on top
 ```
 
 A workspace commit immediately becomes that Agent instance's next state. It
 never creates a Proposal implicitly. Workspace storage does not know about
 Swarm Forks; a Fork merely starts with a set of Agent commit IDs.
 
-Adding or removing an Agent is a complete `SwarmDefinition` Proposal. A new
-Agent must provide an initial workspace commit. Removing an Agent removes it
+A Revision is a point-in-time snapshot, not a second running Swarm and not a
+barrier around later workspace work. Main and Forks run; Revisions only record
+state. If Main Agents commit after a Proposal was created, those commits are
+reapplied after the selected Fork's snapshot when it becomes the new Main.
+
+Adding or removing an Agent is a complete `SwarmDefinition` Proposal. Every
+workspace begins with a Framework-created, Ledger-backed root commit, and a new
+Agent must provide that initial commit. Removing an Agent removes it
 from the new Definition and heads but never deletes its Git or Ledger history.
 
 See [docs/DESIGN.md](docs/DESIGN.md).

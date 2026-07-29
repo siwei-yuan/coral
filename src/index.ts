@@ -4,7 +4,13 @@ export type { AgentDefinition } from "./core/agent/definition.ts"
 export { Ledger, activeScope, forkScope } from "./core/ledger/ledger.ts"
 export type { EventDraft, LedgerEvent, Scope } from "./core/ledger/ledger.ts"
 export { GitWorkspaceStore } from "./core/workspace/git-workspace.ts"
-export type { WorkspaceCheckout, WorkspaceFiles, WorkspaceRevision } from "./core/workspace/git-workspace.ts"
+export type {
+  ReappliedWorkspaceCommit,
+  WorkspaceCheckout,
+  WorkspaceFiles,
+  WorkspaceReapplyResult,
+  WorkspaceRevision,
+} from "./core/workspace/git-workspace.ts"
 export { WorkspaceBridge } from "./core/workspace/context-bridge.ts"
 export type { ContextMessage } from "./core/workspace/context-bridge.ts"
 export { Swarm } from "./core/swarm/runtime.ts"

@@ -2,9 +2,12 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { contextText, createFixture, workspaceSeed } from "../test-support/fixture.ts"
 
-test("a Proposal may add an Agent only with an initial workspace head", async (t) => {
-  const { swarm, workspaces, adapter, definition } = await createFixture(t)
-  const auditor = await workspaces.initialize("auditor", workspaceSeed("Audit completed work and report evidence."))
+test("a Proposal may add an Agent only with an initialized workspace", async (t) => {
+  const { swarm, agentRuntime, adapter, definition } = await createFixture(t)
+  const auditor = await agentRuntime.initializeWorkspace(
+    "auditor",
+    workspaceSeed("Audit completed work and report evidence."),
+  )
   const proposed = structuredClone(definition)
   proposed.agents.push({ id: "auditor", harness: "scripted" })
   proposed.routes.push({ on: "audit.requested", to: "auditor" })
@@ -19,28 +22,19 @@ test("a Proposal may add an Agent only with an initial workspace head", async (t
     data: { goal: "add an auditor" },
   })
 
-  assert.throws(
-    () =>
-      swarm.propose({
-        authoredBy: "builder",
-        definition: proposed,
-        agentHeads: { builder: swarm.agentHead("builder"), reviewer: swarm.agentHead("reviewer") },
-        reasonEventIds: [reason.id],
-      }),
-    /exactly match/,
+  await assert.rejects(
+    swarm.propose({ authoredBy: "builder", definition: proposed, reasonEventIds: [reason.id] }),
+    /exactly match the Agents added/,
   )
 
-  const proposal = swarm.propose({
+  const proposal = await swarm.propose({
     authoredBy: "builder",
     definition: proposed,
-    agentHeads: {
-      builder: swarm.agentHead("builder"),
-      reviewer: swarm.agentHead("reviewer"),
-      auditor: auditor.commit,
-    },
+    addedAgentHeads: { auditor: auditor.commit },
     reasonEventIds: [reason.id],
   })
-  assert.deepEqual(proposal.workspaceCommits.auditor, [{ commit: auditor.commit, eventId: null }])
+  assert.equal(proposal.workspaceCommits.auditor?.[0]?.commit, auditor.commit)
+  assert.ok(proposal.workspaceCommits.auditor?.[0]?.eventId)
 
   const fork = swarm.createFork(proposal.id)
   const runStart = adapter.runs.length
@@ -58,7 +52,7 @@ test("a Proposal may add an Agent only with an initial workspace head", async (t
 
   swarm.selectFork({ proposalId: proposal.id, forkId: fork.id, selectedBy: "agent/builder" })
   const candidate = swarm.freezeCandidate(proposal.id)
-  swarm.approveAndActivate(candidate.id, "owner")
+  await swarm.approveAndActivate(candidate.id, "owner")
   assert.equal(swarm.activeRevision().definition.agents.some((agent) => agent.id === "auditor"), true)
   assert.equal(swarm.agentHead("auditor"), candidate.agentHeads.auditor)
 })
@@ -79,23 +73,16 @@ test("a Proposal may remove an Agent without deleting its auditable history", as
 
   const invalid = structuredClone(definition)
   invalid.agents = invalid.agents.filter((agent) => agent.id !== "reviewer")
-  assert.throws(
-    () =>
-      swarm.propose({
-        authoredBy: "builder",
-        definition: invalid,
-        agentHeads: { builder: swarm.agentHead("builder") },
-        reasonEventIds: [reason.id],
-      }),
+  await assert.rejects(
+    swarm.propose({ authoredBy: "builder", definition: invalid, reasonEventIds: [reason.id] }),
     /existing Agent/,
   )
 
   const proposed = structuredClone(invalid)
   proposed.routes = proposed.routes.filter((route) => route.to !== "reviewer")
-  const proposal = swarm.propose({
+  const proposal = await swarm.propose({
     authoredBy: "builder",
     definition: proposed,
-    agentHeads: { builder: swarm.agentHead("builder") },
     reasonEventIds: [reason.id],
   })
   assert.equal(proposal.agentHeads.reviewer, undefined)
@@ -112,7 +99,7 @@ test("a Proposal may remove an Agent without deleting its auditable history", as
   const candidate = swarm.freezeCandidate(proposal.id)
   assert.equal(candidate.agentHeads.reviewer, undefined)
   assert.equal(candidate.workspaceCommits.reviewer?.length, 1)
-  swarm.approveAndActivate(candidate.id, "owner")
+  await swarm.approveAndActivate(candidate.id, "owner")
 
   const historical = swarm.createFork(revision.id)
   const historicalStart = adapter.runs.length

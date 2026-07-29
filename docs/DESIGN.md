@@ -1,5 +1,13 @@
 # Design Contract
 
+## First principles
+
+1. An Agent evolves itself by changing and committing its own workspace.
+2. A Swarm evolves as a whole through immutable Revision snapshots.
+3. Every workspace and Swarm evolution remains traceable through Git and the Ledger.
+
+Only Main and Forks are running states. A Revision is a point-in-time snapshot.
+
 ## Center and layers
 
 The native Harness is the execution center. A thin Adapter drives it. Each
@@ -60,12 +68,19 @@ another Agent's workspace and suggest changes through Communication Events.
 The Workspace store only knows Git commits and worktrees. It has no Swarm,
 Revision, Proposal, or Fork abstraction.
 
-## Swarm revisions and Forks
+Every workspace starts from exactly one root commit created by the Framework.
+That commit contains the initial Agent files and is recorded as
+`agent.workspace.initialized`; it is not attributed to an Agent turn. Bootstrap
+Agents and Agents added by a Proposal must reference such an initial commit.
 
-A Swarm Revision is an immutable aggregate of one complete Definition and the
-workspace commits produced by multiple Agents since its parent Revision. It
-also records the resulting head for every Agent. The Revision references those
-commits; it does not turn ordinary workspace commits into gated changes.
+## Main, Revision snapshots, and Forks
+
+Main is the one live Swarm. Its Agent workspace heads may advance after its
+latest Revision. A Swarm Revision is only an immutable snapshot: one complete
+Definition, the exact workspace head of every Agent at that point, Plugin
+bindings, and audit references. `workspaceCommits` records the Git/Ledger
+evidence represented by the snapshot; it does not gate ordinary workspace
+changes or own later commits.
 
 `SwarmDefinition` is the Agent graph; there is no second `GraphRevision` type.
 Adding or removing an Agent means proposing another complete Definition:
@@ -83,19 +98,30 @@ A Proposal pins one base Revision, the complete proposed Definition, every
 Agent head, the workspace commits accumulated since the base, Plugin bindings,
 causal Events, and the test suite with its input Events.
 
-A complete Swarm Fork may start from any stored Revision or any Proposal. A
-Revision Fork reproduces that historical Swarm state. A Proposal Fork evaluates
-the proposed state and may be selected for a Candidate Revision. Forks from the
-same source begin with the same Definition, Agent heads, Plugins, tests, and
-test inputs; their subsequent Events and commits may diverge.
+A complete Swarm Fork may start from any stored Revision or any Proposal. It is
+the Swarm equivalent of a Git worktree: an isolated, mutable whole-Swarm state.
+A Revision Fork reproduces that historical snapshot. A Proposal Fork evaluates
+the proposed state and may be selected. Forks from the same source begin with
+the same Definition, Agent heads, Plugins, tests, and test inputs; their
+subsequent Events and commits may diverge.
 
 Events remain in one physical hash chain. Active and Fork scopes control
 visibility. A Fork sees active history through its source Revision or Proposal
 frontier plus its own scoped Events; it cannot see another Fork's Events.
 
-One selected Fork is frozen into an immutable, globally closed Candidate
-Revision. A Human Decision targets that exact Candidate. Only approval may move
-the active revision pointer, and only if the expected base is still active.
+One selected Fork is frozen into an immutable Candidate Revision snapshot. A
+Human Decision targets that exact snapshot. Approval promotes the selected Fork
+as the only new Main and marks its Revision active. Other Forks remain only as
+auditable evaluation history.
+
+Main may continue to receive Agent workspace commits after the Proposal was
+created. At promotion, those Proposal-later commit tails are continued after
+the selected Fork's snapshot. If the Fork did not change a workspace, its Main
+head is retained unchanged. If both sides changed it, Main commits are reapplied
+onto the Fork head and the old/new commit mapping is recorded in the activation
+Event. A conflict leaves the old Main completely intact; activation is never
+partial. Commits belonging to an Agent removed by the new Definition remain in
+Git and the Ledger but are not part of the new Main.
 
 An Agent may author a modified complete `SwarmDefinition`, including Agent
 composition, Harness bindings, routes, tests, and Plugin bindings. This is
@@ -103,8 +129,9 @@ proposal authority, never authority to mutate the active Definition in place.
 
 An Agent changes its own responsibility, context, memory, skills, or context
 composition by editing its workspace. The resulting commit affects its next
-turn immediately. A later Swarm Revision may aggregate that commit alongside
-commits from other Agents; this does not change the commit's workspace meaning.
+turn immediately. A later Swarm Revision may snapshot that head and reference
+its commits alongside other Agents' commits; this does not change the commit's
+workspace meaning.
 
 ## Agent Swarm view
 
@@ -123,6 +150,12 @@ The Workspace Bridge passes this structured view to `context.ts`. The default
 Snapshot composer renders it as concise Markdown. An Agent may edit
 `context.ts` to reorder, reformat, or omit it, preserving Agent ownership of
 context composition while Core remains the source of topology facts.
+
+`context.ts` currently executes in the Core process. The intended security
+boundary is broader and simpler: the Agent Harness, Agent-owned code, and its
+workspace should eventually run together inside one sandbox, while Swarm Core
+and the Ledger remain outside. This boundary is recorded here but is not part
+of the current implementation.
 
 ## Plugins
 

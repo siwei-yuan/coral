@@ -1,6 +1,7 @@
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises"
 import { join, relative, resolve } from "node:path"
 import { immutable } from "../core/canonical.ts"
+import type { AgentRuntime } from "../core/agent/runtime.ts"
 import type { SwarmDefinition } from "../core/swarm/definition.ts"
 import { validateDefinition } from "../core/swarm/definition.ts"
 import type { GitWorkspaceStore, WorkspaceFiles } from "../core/workspace/git-workspace.ts"
@@ -73,14 +74,14 @@ export class SnapshotStore {
 
   async instantiate(
     name: string,
-    workspaces: GitWorkspaceStore,
+    agentRuntime: AgentRuntime,
   ): Promise<{ manifest: SnapshotManifest; definition: SwarmDefinition; agentHeads: Record<string, string> }> {
     const manifest = await this.load(name)
     const agentHeads: Record<string, string> = {}
     for (const agent of manifest.definition.agents) {
       const root = safeSnapshotPath(this.root, name, manifest.workspaces[agent.id]!)
       const files = await readFiles(root)
-      agentHeads[agent.id] = (await workspaces.initialize(agent.id, files)).commit
+      agentHeads[agent.id] = (await agentRuntime.initializeWorkspace(agent.id, files)).commit
     }
     return immutable({ manifest, definition: manifest.definition, agentHeads })
   }
