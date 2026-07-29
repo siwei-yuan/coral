@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { AgentRuntime, GitWorkspaceStore, Ledger, Swarm } from "../src/index.js"
 
 export async function createFixture(t) {
-  const root = await mkdtemp(join(tmpdir(), "verifiable-swarm-"))
+  const root = await mkdtemp(join(tmpdir(), "corallum-"))
   t.after(() => rm(root, { recursive: true, force: true }))
 
   const workspaces = new GitWorkspaceStore(join(root, "workspaces"))
@@ -16,7 +16,14 @@ export async function createFixture(t) {
   const agentRuntime = new AgentRuntime({ ledger, workspaces, adapters: [adapter] })
   const swarm = new Swarm({ ledger, agentRuntime, workspaces })
   const definition = {
-    agents: [{ id: "builder", harness: "scripted" }],
+    agents: [
+      {
+        id: "builder",
+        harness: "scripted",
+        role: "Build and improve the requested behavior.",
+        context: ["Own only the builder workspace.", "Emit high-level result Events."],
+      },
+    ],
     routes: [{ on: "test.requested", to: "builder" }],
     externalChannels: [{ plugin: "chat", ingressTo: "builder", egressFrom: ["builder"] }],
     plugins: [{ id: "chat", version: "1", digest: "chat-v1", mode: "live" }],
@@ -38,8 +45,10 @@ export async function createFixture(t) {
 
 class ScriptedHarnessAdapter {
   id = "scripted"
+  runs = []
 
-  async run({ turnId, scope, workingDirectory, inputEvents }) {
+  async run({ turnId, role, context, scope, workingDirectory, inputEvents }) {
+    this.runs.push({ role, context })
     await mkdir(join(workingDirectory, "memory"), { recursive: true })
     const identity = scope.kind === "fork" ? scope.forkId : "agent-draft"
     await writeFile(join(workingDirectory, "memory", "last-run.txt"), `${identity}\n`, "utf8")

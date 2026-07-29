@@ -388,7 +388,7 @@ export class Swarm {
   }
 }
 
-function validateDefinition(definition) {
+export function validateDefinition(definition) {
   if (!definition || typeof definition !== "object") throw new Error("Swarm Definition is required")
   const copy = structuredClone({
     agents: definition.agents ?? [],
@@ -399,7 +399,12 @@ function validateDefinition(definition) {
   })
   const ids = new Set()
   for (const agent of copy.agents) {
-    if (!agent.id || !agent.harness) throw new Error("Every Agent requires id and harness")
+    if (!agent.id || !agent.harness || typeof agent.role !== "string" || agent.role.trim() === "") {
+      throw new Error("Every Agent requires id, harness, and role")
+    }
+    if (!Array.isArray(agent.context) || agent.context.some((item) => typeof item !== "string")) {
+      throw new Error("Every Agent context must be an ordered string array")
+    }
     if (ids.has(agent.id)) throw new Error(`duplicate Agent: ${agent.id}`)
     ids.add(agent.id)
   }

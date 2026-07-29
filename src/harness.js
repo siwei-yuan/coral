@@ -24,6 +24,8 @@ export class AgentRuntime {
         const result = await adapter.run({
           turnId,
           agentId: agent.id,
+          role: agent.role,
+          context: agent.context,
           scope,
           workingDirectory: checkout.worktree,
           inputEvents,

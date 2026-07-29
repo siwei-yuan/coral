@@ -1,5 +1,6 @@
 export { AgentRuntime } from "./harness.js"
 export { Ledger, activeScope, forkScope } from "./ledger.js"
 export { ChatPlugin } from "./plugins.js"
-export { Swarm } from "./swarm.js"
+export { SnapshotStore } from "./snapshots.js"
+export { Swarm, validateDefinition } from "./swarm.js"
 export { GitWorkspaceStore } from "./workspace.js"

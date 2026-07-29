@@ -7,6 +7,11 @@ Agent owns a Git workspace through which it controls context, instructions,
 memory, skills, code, and tests. Swarm composes Agents, routing, pinned tests,
 Plugins, Proposals, Forks, evaluation, Human Decisions, and activation.
 
+Every Agent entry in `SwarmDefinition` declares its Harness, role, and ordered
+initial context. These fields initialize the Agent's responsibility and the
+context supplied to its Harness; longer-lived, self-edited material belongs in
+the Agent's workspace.
+
 The Ledger is a high-level causal spine. It records Communication, one Event per
 logical Agent turn, workspace commits, and Swarm evolution. Native tool calls,
 reasoning, file reads, model tokens, queue state, and Plugin transport details
@@ -37,6 +42,10 @@ One selected Fork is frozen into an immutable, globally closed Candidate
 Revision. A Human Decision targets that exact Candidate. Only approval may move
 the active revision pointer, and only if the expected base is still active.
 
+An Agent may author a modified complete `SwarmDefinition`, including Agent
+roles, initial context, routes, tests, and Plugin bindings. This is proposal
+authority, never authority to mutate the active Definition in place.
+
 ## Plugins
 
 A Plugin adapts an external protocol to Event ingress, Event egress, and/or
@@ -46,3 +55,21 @@ schemas. Plugin operations are not Ledger Events merely because they occurred.
 
 Only the active Swarm may use live external egress. Forks use disabled,
 read-only, sandbox, or mock bindings.
+
+## Snapshots
+
+A Snapshot is a portable, reusable Swarm blueprint:
+
+```text
+snapshot.json
+agents/<agent-id>/...
+```
+
+`snapshot.json` contains the complete Definition and source revision evidence;
+each Agent directory contains its seed workspace tree. Import initializes new
+Agent Git repositories and returns the Definition plus their initial heads.
+
+A Snapshot intentionally excludes live Harness sessions, runtime queues,
+secrets, Plugin connections, and low-level trajectories. It is a reusable
+starting state, not a replacement for the Ledger or an exact forensic archive
+of a running instance.

@@ -1,7 +1,11 @@
-# Verifiable Swarm
+# Corallum
 
 A small, zero-dependency implementation of a Harness-centered, Git-backed,
 human-gated Agent Swarm.
+
+The name comes from the complete skeleton built by a coral colony: individual
+polyps grow their own corallites, the colony grows as one structure, and its
+layers preserve the history of that growth.
 
 The runtime has six concepts:
 
@@ -13,6 +17,8 @@ The runtime has six concepts:
    freeze, Human Decision, and atomic activation.
 6. Plugins adapt external protocols to Event ingress, Event egress, or Harness
    tools. `ChatPlugin` is the first reference boundary.
+7. `SnapshotStore` exports and imports complete reusable Swarm blueprints under
+   `snapshots/`.
 
 There is deliberately no workflow engine, generic ChangeSet system, extension
 registry, database layer, CLI framework, or test framework.
@@ -39,6 +45,17 @@ Workspace commits never create Proposals implicitly. Workspace storage does
 not know about Swarm Forks; a Fork merely pins Agent commit IDs.
 
 See [docs/DESIGN.md](docs/DESIGN.md).
+
+## Snapshots
+
+A Snapshot contains the complete Swarm Definition plus the seed workspace tree
+for every Agent. Definitions include each Agent's role and initial context, and
+an Agent may propose a modified complete Definition through the normal
+human-gated revision lifecycle.
+
+`snapshots/continual-harness/` is a small Actor–Refiner example inspired by the
+Continual Harness pattern. It is a Corallum blueprint, not a vendored copy or a
+claim of compatibility with another project.
 
 ## Run
 

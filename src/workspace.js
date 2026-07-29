@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process"
-import { mkdir, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, writeFile } from "node:fs/promises"
 import { dirname, isAbsolute, join, relative, resolve } from "node:path"
 import { promisify } from "node:util"
 import { digest, immutable } from "./canonical.js"
@@ -20,7 +20,7 @@ export class GitWorkspaceStore {
     for (const [path, content] of Object.entries(files)) {
       const target = safePath(repository, path)
       await mkdir(dirname(target), { recursive: true })
-      await writeFile(target, content, "utf8")
+      await writeFile(target, content)
     }
     await git(repository, ["add", "-A"])
     await git(repository, ["commit", "--allow-empty", "-m", "Initialize Agent workspace"])
@@ -69,6 +69,21 @@ export class GitWorkspaceStore {
     return git(this.#repository(agentId), ["show", `${commit}:${path}`])
   }
 
+  async exportTree(agentId, commit, destination) {
+    const repository = this.#repository(agentId)
+    await mkdir(destination, { recursive: true })
+    const listing = await gitBuffer(repository, ["ls-tree", "-r", "-z", commit])
+    for (const entry of listing.toString("utf8").split("\0").filter(Boolean)) {
+      const [metadata, path] = entry.split("\t")
+      const [mode, type, object] = metadata.split(" ")
+      if (type !== "blob") throw new Error(`Snapshot only supports Git blobs: ${path}`)
+      const target = safePath(destination, path)
+      await mkdir(dirname(target), { recursive: true })
+      await writeFile(target, await gitBuffer(repository, ["cat-file", "blob", object]))
+      if (mode === "100755") await chmod(target, 0o755)
+    }
+  }
+
   #repository(agentId) {
     if (!/^[a-zA-Z0-9._-]+$/.test(agentId)) throw new Error(`invalid Agent ID: ${agentId}`)
     return join(this.root, "agents", agentId)
@@ -84,6 +99,19 @@ async function git(cwd, args, extraEnvironment = {}) {
     return stdout
   } catch (error) {
     const detail = error.stderr?.trim() || error.message
+    throw new Error(`git ${args.join(" ")} failed: ${detail}`)
+  }
+}
+
+async function gitBuffer(cwd, args) {
+  try {
+    const { stdout } = await runFile("git", ["-C", cwd, ...args], {
+      encoding: "buffer",
+      maxBuffer: 64 * 1024 * 1024,
+    })
+    return stdout
+  } catch (error) {
+    const detail = error.stderr?.toString().trim() || error.message
     throw new Error(`git ${args.join(" ")} failed: ${detail}`)
   }
 }
