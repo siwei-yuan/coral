@@ -212,12 +212,15 @@ with mock mode; actual runtime isolation remains part of the deferred
 Agent-plus-workspace sandbox.
 
 Scheduler is a normal Plugin, not a Core service. Its CLI lets an Agent set,
-remove, and list its own named recurring durations and notes. Its runtime owns
-the schedule records and returns due inbound Communications when polled by the
-host. Each firing contains the name, exact duration, scheduled time, and note,
-and explicitly targets the schedule owner. Schedule configuration is a CLI
-operation rather than a Ledger Event. The current version deliberately has no
-cron grammar, calendar recurrence, workflow engine, or Scheduler-specific View.
+remove, and list its own named recurring durations and notes. The Plugin runtime
+must own its clock loop and emit due inbound Communications; a deployment layer
+starts the Plugin but never polls schedules or configures one for an Agent. Each
+firing contains the name, exact duration, scheduled time, and note, and
+explicitly targets the schedule owner. Schedule configuration is a CLI operation
+rather than a Ledger Event. The current version deliberately has no cron
+grammar, calendar recurrence, workflow engine, or Scheduler-specific View. The
+implemented `due()` API is an interim mismatch and must be replaced by the
+Plugin-owned loop before generic deployment.
 
 ## Views
 
@@ -246,20 +249,42 @@ storage for trajectory excerpts, and Plugin stores for artifacts such as raw
 screenshots. Alternative open-source Views can use the same Ledger projection
 or build their own without changing Core.
 
-### Deferred: Plugin-owned evolution
+### Designed next: Git-backed Plugin evolution
 
-Plugin versioning is intentionally outside the current implementation. A future
-Plugin may own an independent Git-backed folder containing its implementation,
-Agent-facing contract, and optional executable helpers. Agents may inspect the
-pinned folder read-only; a Plugin never initializes or modifies an Agent
-workspace.
+Plugin versioning is required before generic Snapshot deployment. It follows
+the same draft-versus-active separation as Agent self-evolution, without adding
+an independent Plugin approval system.
 
-A future `SwarmDefinition` and Revision may pin the exact Plugin commit alongside
-Agent workspace commits. Changing that pin would then be a Swarm-level change
-that follows the normal Proposal, Fork execution, and Human activation path.
-Mutable operational state such as screenshots, OCR output, App sessions,
-credentials, cursors, and caches remains Plugin-owned runtime data outside that
-Git commit. This is a recorded direction, not a current Core contract.
+Each Plugin owns one Git-backed code workspace. Agents listed in that Plugin's
+`exposedTo` set can see and edit its draft checkout directly. A successful edit
+must create a Git commit and a high-level `plugin.workspace.committed` Event
+attributed to the Agent. The commit immediately advances the Plugin's draft
+head but never changes the code used by the active Swarm. Initialization is
+similarly backed by a root commit and `plugin.workspace.initialized` Event.
+
+The active `SwarmDefinition` pins an exact Plugin commit. Runtime CLIs and
+inbound runtimes execute from an isolated checkout of that pinned commit, never
+from the editable draft checkout. An Agent may therefore advance Chat from
+`v1 -> v2 -> v3` while the active Swarm continues to execute `v1`.
+
+When an Agent proposes a complete Swarm Revision, it may change Chat's pin from
+`v1` directly to `v3`. Proposal Forks evaluate the exact pinned Plugin code in
+mock/isolated mode. Plugin code is read-only inside those evaluation Forks in
+the first version: further Plugin edits require another Main draft commit and a
+later Proposal. Human approval activates the selected Swarm Revision and all of
+its Plugin pins together. There is no independent Plugin activation Event.
+
+Commits skipped by a Proposal, such as `v2`, remain ordinary auditable Git
+history. Commits made after a Proposal remain draft candidates for a later
+Swarm Revision; approving the earlier Proposal does not discard or implicitly
+activate them. The first implementation uses one serialized draft head per
+Plugin rather than per-Agent Plugin branches.
+
+Git commit IDs are the version identity. Semver, dependency solving, package
+publishing, migration protocols, and a separate Plugin Revision store are not
+part of this design. Mutable operational data such as schedules, screenshots,
+OCR output, App sessions, credentials, cursors, and caches is not versioned with
+the code.
 
 ## Snapshots
 
@@ -281,3 +306,7 @@ A Snapshot intentionally excludes live Harness sessions, runtime queues,
 secrets, Plugin connections, and low-level trajectories. It is a reusable
 starting state, not a replacement for the Ledger or an exact forensic archive
 of a running instance.
+
+Direct Snapshot deployment remains deferred until every referenced Plugin is
+backed by deployable Git objects and the Definition pins its exact commit. A
+deployment must never resolve a mutable local Plugin folder by name alone.
