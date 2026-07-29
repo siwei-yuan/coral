@@ -15,8 +15,8 @@ export interface ExternalChannel {
 
 export interface PluginBinding {
   id: string
-  version: string
-  digest: string
+  command: string
+  exposedTo: string[]
   mode: string
 }
 
@@ -46,7 +46,7 @@ export interface AgentSwarmView {
     externalFacing: boolean
   }>
   routes: Route[]
-  plugins: Array<{ id: string; mode: string }>
+  plugins: Array<{ id: string; command: string; mode: string }>
 }
 
 export function validateDefinition(definition: unknown): SwarmDefinition {
@@ -70,8 +70,17 @@ export function validateDefinition(definition: unknown): SwarmDefinition {
       throw new Error("Every communication route requires existing sender and receiver Agents")
     }
   }
+  const pluginIds = new Set<string>()
+  for (const plugin of copy.plugins) {
+    if (!plugin.id || !plugin.command) throw new Error("Every Plugin requires id and command")
+    if (pluginIds.has(plugin.id)) throw new Error(`duplicate Plugin: ${plugin.id}`)
+    if (!Array.isArray(plugin.exposedTo) || plugin.exposedTo.some((agentId) => !ids.has(agentId))) {
+      throw new Error("Plugin exposure Agents must exist")
+    }
+    pluginIds.add(plugin.id)
+  }
   for (const channel of copy.externalChannels) {
-    if (!channel.plugin || !ids.has(channel.ingressTo)) {
+    if (!pluginIds.has(channel.plugin) || !ids.has(channel.ingressTo)) {
       throw new Error("External channel requires a Plugin and existing ingress Agent")
     }
     if (!Array.isArray(channel.egressFrom) || channel.egressFrom.some((agentId) => !ids.has(agentId))) {
@@ -115,6 +124,8 @@ export function projectAgentSwarmView(
       ),
     })),
     routes: definition.routes,
-    plugins: pluginBindings.map((plugin) => ({ id: plugin.id, mode: plugin.mode })),
+    plugins: pluginBindings
+      .filter((plugin) => plugin.exposedTo.includes(self))
+      .map((plugin) => ({ id: plugin.id, command: plugin.command, mode: plugin.mode })),
   })
 }

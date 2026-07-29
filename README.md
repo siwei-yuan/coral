@@ -16,8 +16,8 @@ The runtime has eight concepts:
 5. `AgentRuntime` records one logical turn and any resulting workspace commit.
 6. `Swarm` snapshots Main as Revisions, creates isolated whole-Swarm Forks,
    evaluates them, and promotes one selected Fork as the new Main after Human approval.
-7. Plugins adapt external protocols to Event ingress, Event egress, or Harness
-   tools. `ChatPlugin` is the first reference boundary.
+7. Plugins own external runtimes and expose shell CLIs to authorized Agents.
+   Chat and Screen are the first concrete bundles.
 8. `SnapshotStore` exports and imports complete reusable Swarm blueprints under
    `snapshots/`.
 
@@ -34,8 +34,10 @@ src/
 │   ├── agent/
 │   └── swarm/
 ├── harness/
-├── plugins/
 └── snapshots/
+plugins/
+├── chat/
+└── screen/
 ```
 
 Workspace knows only Git. Agent combines Workspace and a Harness. Swarm
@@ -68,6 +70,12 @@ Ordinary Agent collaboration uses only `communication.sent`. The active
 Definition declares allowed Agent-to-Agent edges; Main and Forks validate those
 edges and deliver each message to its recipients. Agents see the current Agent
 set and communication graph in their runtime Swarm view.
+
+Each Plugin binding names one shell command and the Agents allowed to see it.
+The Harness receives only those command descriptors; no Plugin file is copied
+into an Agent workspace. Plugin CLI calls remain Harness operations. Chat user
+input, Chat replies, and new Screen activities become `communication.sent`
+because they are high-level communication facts.
 
 A Revision is a point-in-time snapshot, not a second running Swarm and not a
 barrier around later workspace work. Main and Forks run; Revisions only record

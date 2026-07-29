@@ -9,7 +9,8 @@ This is a deliberately small Corallum Actor–Refiner blueprint:
 - Their responsibilities and initial context live in those workspaces.
 - Each workspace owns a `context.ts` that assembles its Harness messages.
 - The default composer includes a compact runtime view of Agents, Routes, and
-  available Plugins without copying the Swarm Definition into the workspace.
+  authorized Plugin CLI commands without copying the Swarm Definition or any
+  Plugin files into the workspace.
 - Refiner communicates suggestions rather than editing Actor files directly.
 - Role/context changes are ordinary owner workspace commits and affect that
   Agent's next turn immediately. Route, test,

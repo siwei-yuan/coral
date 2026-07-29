@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import type { HarnessAdapter, HarnessEmission } from "../../harness/adapter.ts"
+import type { HarnessAdapter, HarnessEmission, HarnessPluginCommand } from "../../harness/adapter.ts"
 import type { AgentDefinition } from "./definition.ts"
 import { WorkspaceBridge } from "../workspace/context-bridge.ts"
 import type {
@@ -18,6 +18,7 @@ export interface AgentTurnInput {
   inputEvents: LedgerEvent[]
   runtimeContext?: Record<string, unknown>
   workspaceHeads?: Record<string, string>
+  pluginCommands?: HarnessPluginCommand[]
 }
 
 export interface AgentTurnResult {
@@ -99,6 +100,7 @@ export class AgentRuntime {
     inputEvents,
     runtimeContext = {},
     workspaceHeads = {},
+    pluginCommands = [],
   }: AgentTurnInput): Promise<AgentTurnResult> {
     const adapter = this.adapters.get(agent.harness)
     if (!adapter) throw new Error(`Harness Adapter is not registered: ${agent.harness}`)
@@ -128,6 +130,7 @@ export class AgentRuntime {
           workingDirectory: checkout.worktree,
           inputEvents,
           context,
+          pluginCommands,
           readWorkspace: (agentId, path) => {
             const commit = workspaceHeads[agentId]
             if (!commit) throw new Error(`Agent workspace is not visible: ${agentId}`)

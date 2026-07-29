@@ -1,5 +1,6 @@
 import { contentId, digest, immutable } from "../canonical.ts"
 import type { AgentRuntime, AgentTurnResult } from "../agent/runtime.ts"
+import type { HarnessPluginCommand, PluginExecutable } from "../../harness/adapter.ts"
 import type { EventDraft, Ledger, LedgerEvent } from "../ledger/ledger.ts"
 import { activeScope, forkScope } from "../ledger/ledger.ts"
 import type { PluginBinding, SwarmDefinition } from "./definition.ts"
@@ -39,21 +40,32 @@ export class Swarm {
   #forks = new Map<string, MutableFork>()
   #candidates = new Map<string, SwarmRevision>()
   #agentHeads = new Map<string, string>()
+  #pluginExecutables = new Map<string, PluginExecutable>()
   #activeRevisionId: string | null = null
   #mainOperations: Promise<unknown> = Promise.resolve()
 
   readonly ledger: Ledger
   readonly agentRuntime: AgentRuntime
 
-  constructor({ ledger, agentRuntime }: { ledger: Ledger; agentRuntime: AgentRuntime }) {
+  constructor({
+    ledger,
+    agentRuntime,
+    pluginExecutables = [],
+  }: {
+    ledger: Ledger
+    agentRuntime: AgentRuntime
+    pluginExecutables?: PluginExecutable[]
+  }) {
     this.ledger = ledger
     this.agentRuntime = agentRuntime
+    this.#pluginExecutables = new Map(pluginExecutables.map((plugin) => [plugin.id, plugin]))
   }
 
   async bootstrap({ definition, agentHeads, human }: BootstrapInput): Promise<SwarmRevision> {
     if (this.#activeRevisionId) throw new Error("Swarm is already bootstrapped")
     assertHuman(human)
     const checkedDefinition = validateDefinition(definition)
+    this.#assertPluginExecutables(checkedDefinition)
     assertCompleteHeads(checkedDefinition, agentHeads)
     await Promise.all(
       checkedDefinition.agents.map((agent) => this.agentRuntime.assertWorkspaceCommit(agent.id, agentHeads[agent.id]!, true)),
@@ -140,10 +152,10 @@ export class Swarm {
       if (!channel) throw new Error(`No external channel for Plugin: ${data.source.plugin}`)
       if (!Array.isArray(data.to) || data.to.length === 0) data.to = [`agent/${channel.ingressTo}`]
     }
-    return this.appendInput({
-      type: draft.type,
-      ...(draft.schema ? { schema: draft.schema } : {}),
-      actor: draft.actor,
+    return this.ledger.append({
+      ...draft,
+      scope: activeScope(),
+      swarmRevision: this.activeRevision().id,
       data,
     })
   }
@@ -201,6 +213,7 @@ export class Swarm {
       scope,
       inputEvents: [input],
       workspaceHeads: Object.fromEntries(this.#agentHeads),
+      pluginCommands: this.#commandsFor(revision.definition.plugins, agentId),
       runtimeContext: {
         swarm: projectAgentSwarmView(
           revision.definition,
@@ -241,6 +254,7 @@ export class Swarm {
       throw new Error("Proposal requires at least one committed causal Event")
     }
     const checkedDefinition = validateDefinition(definition)
+    this.#assertPluginExecutables(checkedDefinition)
     if (checkedDefinition.tests.length === 0) throw new Error("Proposal requires pinned tests and test inputs")
     const existingAgentIds = new Set(base.definition.agents.map((agent) => agent.id))
     const addedAgentIds = checkedDefinition.agents
@@ -571,6 +585,7 @@ export class Swarm {
           scope: fork.scope,
           inputEvents: [event],
           workspaceHeads: { ...fork.agentHeads },
+          pluginCommands: this.#commandsFor(fork.pluginBindings, agent.id),
           runtimeContext: {
             swarm: projectAgentSwarmView(
               fork.definition,
@@ -626,6 +641,26 @@ export class Swarm {
       () => undefined,
     )
     return current
+  }
+
+  #assertPluginExecutables(definition: SwarmDefinition): void {
+    for (const plugin of definition.plugins) {
+      if (!this.#pluginExecutables.has(plugin.id)) throw new Error(`Plugin executable is not registered: ${plugin.id}`)
+    }
+  }
+
+  #commandsFor(bindings: PluginBinding[], agentId: string): HarnessPluginCommand[] {
+    return bindings
+      .filter((binding) => binding.exposedTo.includes(agentId))
+      .map((binding) => {
+        const executable = this.#pluginExecutables.get(binding.id)
+        if (!executable) throw new Error(`Plugin executable is not registered: ${binding.id}`)
+        return immutable({
+          ...executable,
+          command: binding.command,
+          mode: binding.mode,
+        })
+      })
   }
 }
 

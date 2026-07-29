@@ -15,7 +15,7 @@ function renderSwarm(swarm) {
     return `- ${label}: receives from ${receives}; sends to ${sendsTo}${agent.externalFacing ? "; external-facing" : ""}`
   })
   const routes = swarm.routes.map((route) => `- ${route.from} -> ${route.to}`)
-  const plugins = swarm.plugins.map((plugin) => `- ${plugin.id} (${plugin.mode})`)
+  const plugins = swarm.plugins.map((plugin) => `- ${plugin.id}: ${plugin.command} (${plugin.mode})`)
   return [
     "# Current Swarm",
     `You are: ${swarm.self}`,

@@ -10,6 +10,7 @@ import {
   type ContextMessage,
   type HarnessAdapter,
   type HarnessInput,
+  type HarnessPluginCommand,
   type HarnessResult,
   type SwarmDefinition,
   type WorkspaceFiles,
@@ -31,7 +32,11 @@ export async function createFixture(t: TestContext) {
     "reviewer",
     workspaceSeed("Review evidence and improve your own procedure."),
   )
-  const swarm = new Swarm({ ledger, agentRuntime })
+  const swarm = new Swarm({
+    ledger,
+    agentRuntime,
+    pluginExecutables: [{ id: "chat", executable: "/plugins/chat/bin/chat" }],
+  })
   const definition: SwarmDefinition = {
     agents: [
       { id: "builder", harness: "scripted" },
@@ -39,7 +44,7 @@ export async function createFixture(t: TestContext) {
     ],
     routes: [{ from: "builder", to: "reviewer" }],
     externalChannels: [{ plugin: "chat", ingressTo: "builder", egressFrom: ["builder"] }],
-    plugins: [{ id: "chat", version: "1", digest: "chat-v1", mode: "live" }],
+    plugins: [{ id: "chat", command: "chat", exposedTo: ["builder"], mode: "live" }],
     tests: [
       {
         id: "core-behavior",
@@ -86,7 +91,7 @@ function renderSwarm(swarm) {
     return \`- \${label}: receives from \${receives}; sends to \${sendsTo}\${agent.externalFacing ? "; external-facing" : ""}\`
   })
   const routes = swarm.routes.map((route) => \`- \${route.from} -> \${route.to}\`)
-  const plugins = swarm.plugins.map((plugin) => \`- \${plugin.id} (\${plugin.mode})\`)
+  const plugins = swarm.plugins.map((plugin) => \`- \${plugin.id}: \${plugin.command} (\${plugin.mode})\`)
   return [
     "# Current Swarm",
     \`You are: \${swarm.self}\`,
@@ -113,6 +118,7 @@ function renderSwarm(swarm) {
 export interface RecordedRun {
   agentId: string
   context: ContextMessage[]
+  pluginCommands: HarnessPluginCommand[]
 }
 
 class ScriptedHarnessAdapter implements HarnessAdapter {
@@ -126,9 +132,10 @@ class ScriptedHarnessAdapter implements HarnessAdapter {
     workingDirectory,
     inputEvents,
     context,
+    pluginCommands,
     readWorkspace,
   }: HarnessInput): Promise<HarnessResult> {
-    this.runs.push({ agentId, context })
+    this.runs.push({ agentId, context, pluginCommands })
     if (inputEvents[0]?.type === "agent.workspace.improvement.requested") {
       await appendFile(join(workingDirectory, "AGENTS.md"), "Evolved responsibility: verify the result.\n")
       await appendFile(join(workingDirectory, "context", "initial.md"), "Use evidence from prior Events.\n")

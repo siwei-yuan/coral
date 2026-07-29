@@ -25,6 +25,8 @@ test("Main routes Agent Communication through the active Swarm Definition", asyn
     adapter.runs.slice(-2).map((run) => run.agentId),
     ["builder", "reviewer"],
   )
+  assert.deepEqual(adapter.runs.at(-2)?.pluginCommands.map((plugin) => plugin.command), ["chat"])
+  assert.deepEqual(adapter.runs.at(-1)?.pluginCommands, [])
 })
 
 test("an Agent may request a Swarm Revision Proposal from its turn", async (t) => {

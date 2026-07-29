@@ -14,6 +14,17 @@ export interface HarnessResult {
   trajectory?: unknown
 }
 
+export interface PluginExecutable {
+  id: string
+  executable: string
+  env?: Record<string, string>
+}
+
+export interface HarnessPluginCommand extends PluginExecutable {
+  command: string
+  mode: string
+}
+
 export interface HarnessInput {
   turnId: string
   agentId: string
@@ -21,6 +32,7 @@ export interface HarnessInput {
   workingDirectory: string
   inputEvents: LedgerEvent[]
   context: ContextMessage[]
+  pluginCommands: HarnessPluginCommand[]
   readWorkspace(agentId: string, path: string): Promise<string>
 }
 

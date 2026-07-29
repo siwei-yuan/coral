@@ -24,6 +24,15 @@ export type {
   SwarmTest,
 } from "./core/swarm/definition.ts"
 export type { ForkSnapshot, SwarmProposal, SwarmRevision, WorkspaceCommitRef } from "./core/swarm/revision.ts"
-export type { HarnessAdapter, HarnessEmission, HarnessInput, HarnessResult } from "./harness/adapter.ts"
-export { ChatPlugin } from "./plugins/chat.ts"
+export type {
+  HarnessAdapter,
+  HarnessEmission,
+  HarnessInput,
+  HarnessPluginCommand,
+  HarnessResult,
+  PluginExecutable,
+} from "./harness/adapter.ts"
+export { ChatRuntime } from "../plugins/chat/runtime.ts"
+export { ScreenRuntime } from "../plugins/screen/runtime.ts"
+export type { ScreenActivity, ScreenActivityInput, ScreenCaptureInput } from "../plugins/screen/runtime.ts"
 export { SnapshotStore } from "./snapshots/store.ts"

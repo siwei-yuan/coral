@@ -146,14 +146,15 @@ workspace meaning.
 
 Before every turn, Swarm projects the source Definition into an
 `AgentSwarmView` containing the Agent's own ID, all Agent IDs, their routed
-senders and recipients, Routes, external-facing status, Plugin IDs/modes, source
-Revision/Proposal, and active/Fork scope. Proposal Forks therefore see the
-proposed topology; historical Revision Forks see the historical topology.
+senders and recipients, Routes, external-facing status, authorized Plugin
+commands/modes, source Revision/Proposal, and active/Fork scope. Proposal Forks
+therefore see the proposed topology; historical Revision Forks see the
+historical topology.
 
-The view intentionally excludes tests and expected results, Plugin digests and
-secrets, other Agents' workspace contents, and Harness trajectories. It is a
-runtime input, not a workspace file, so it cannot become a stale second copy of
-the Definition.
+The view intentionally excludes tests and expected results, Plugin executable
+paths and environment, secrets, other Agents' workspace contents, and Harness
+trajectories. It is a runtime input, not a workspace file, so it cannot become
+a stale second copy of the Definition.
 
 The Workspace Bridge passes this structured view to `context.ts`. The default
 Snapshot composer renders it as concise Markdown. An Agent may edit
@@ -168,13 +169,21 @@ of the current implementation.
 
 ## Plugins
 
-A Plugin adapts an external protocol to Event ingress, Event egress, and/or
-Harness tools. Chat reuses `communication.sent`; it does not invent another
-message lifecycle. Genuine domain facts may use Plugin-owned namespaced Event
-schemas. Plugin operations are not Ledger Events merely because they occurred.
+A Plugin owns an external runtime and exposes one shell command to selected
+Agents. Its implementation and runtime data remain outside Agent workspaces.
+`SwarmDefinition` declares the command, mode, and exact Agents that may see it;
+the Harness receives those command descriptors for the turn. The current
+implementation does not claim OS-level command isolation.
 
-Only the active Swarm may use live external egress. Forks use disabled,
-read-only, sandbox, or mock bindings.
+CLI calls are Harness operations, not Ledger Events. Semantic ingress and
+egress still use `communication.sent`: Chat Runtime turns user input and Agent
+CLI replies into Communication Events, while Screen Runtime announces a new
+activity and lets the Agent query its raw image, OCR, and foreground App session
+through the `screen` CLI. No Plugin copies files into or initializes an Agent
+workspace.
+
+Only the active Swarm may use live external egress. Forks replace live bindings
+with mock mode.
 
 ### Deferred: Plugin-owned evolution
 
