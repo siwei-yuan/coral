@@ -19,25 +19,98 @@ test("a workspace commit immediately changes the Agent's next turn without a Swa
   })
   const second = await swarm.runAgentTurn({ agentId: "builder", inputEventId: followup.id })
 
-  assert.notEqual(first.revision.commit, initial.commit)
-  assert.equal(swarm.agentHead("builder"), second.revision.commit)
+  assert.notEqual(first.workspaceCommit.commit, initial.commit)
+  assert.equal(swarm.agentHead("builder"), second.workspaceCommit.commit)
   assert.equal(swarm.activeRevision().id, revision.id)
   assert.equal(swarm.activeRevision().agentHeads.builder, initial.commit)
   assert.equal(first.workspaceEvent?.type, "agent.workspace.committed")
   assert.equal(first.turnEvent.type, "agent.turn.recorded")
   const turnData = first.turnEvent.data as { inputWorkspaceCommit: string; workspaceCommit: string }
   assert.equal(turnData.inputWorkspaceCommit, initial.commit)
-  assert.equal(turnData.workspaceCommit, first.revision.commit)
+  assert.equal(turnData.workspaceCommit, first.workspaceCommit.commit)
   assert.match(contextText(adapter.runs[0]!), /composer:v1/)
   assert.match(contextText(adapter.runs[0]!), /reviewer/)
   assert.match(contextText(adapter.runs[1]!), /Evolved responsibility/)
   assert.match(contextText(adapter.runs[1]!), /prior Events/)
   assert.match(contextText(adapter.runs[1]!), /composer:v2/)
-  assert.match(await workspaces.read("builder", first.revision.commit, "AGENTS.md"), /Evolved responsibility/)
-  assert.match(await workspaces.read("builder", first.revision.commit, "context.ts"), /composer:v2/)
+  assert.match(await workspaces.read("builder", first.workspaceCommit.commit, "AGENTS.md"), /Evolved responsibility/)
+  assert.match(await workspaces.read("builder", first.workspaceCommit.commit, "context.ts"), /composer:v2/)
   assert.doesNotMatch(await workspaces.read("builder", initial.commit, "AGENTS.md"), /Evolved responsibility/)
   assert.equal(ledger.all().some((event) => event.type === "swarm.revision.proposed"), false)
   assert.equal(ledger.verify(), true)
+})
+
+test("Plugin drafts evolve immediately but only a Human-approved Swarm Revision changes the active pin", async (t) => {
+  const { swarm, ledger, definition, adapter, pluginGit } = await createFixture(t)
+  const v1 = definition.plugins[0]!.commit
+
+  const edit = async (version: string) => {
+    const input = swarm.appendInput({
+      type: "plugin.workspace.improvement.requested",
+      actor: "external/user",
+      data: { pluginId: "chat", version },
+    })
+    return swarm.runAgentTurn({ agentId: "builder", inputEventId: input.id })
+  }
+
+  const v2Turn = await edit("chat:v2")
+  const v2 = v2Turn.pluginWorkspaceCommits.chat!.commit
+  const v3Turn = await edit("chat:v3")
+  const v3 = v3Turn.pluginWorkspaceCommits.chat!.commit
+
+  assert.notEqual(v2, v1)
+  assert.notEqual(v3, v2)
+  assert.equal(swarm.activeRevision().definition.plugins[0]!.commit, v1)
+  assert.equal(swarm.pluginDraftHead("chat"), v3)
+  assert.equal(adapter.runs.at(-1)?.pluginCommands[0]?.commit, v1)
+  assert.equal(adapter.runs.at(-1)?.pluginWorkspaces[0]?.draftCommit, v2)
+  assert.match(await pluginGit.read("chat", v3, "runtime.ts"), /chat:v3/)
+
+  const proposedDefinition = structuredClone(definition)
+  proposedDefinition.plugins[0]!.commit = v3
+  const reason = swarm.appendInput({ type: "swarm.evolution.requested", actor: "external/user" })
+  const proposal = await swarm.propose({
+    authoredBy: "builder",
+    definition: proposedDefinition,
+    reasonEventIds: [reason.id],
+  })
+  assert.deepEqual(proposal.pluginCommits.chat?.map((item) => item.commit), [v2, v3])
+
+  const fork = swarm.createFork(proposal.id, "owner")
+  const forkRunStart = adapter.runs.length
+  const evaluated = await swarm.runFork(fork.id)
+  const forkPlugin = adapter.runs.slice(forkRunStart).find((run) =>
+    run.pluginWorkspaces.some((plugin) => plugin.id === "chat"),
+  )
+  assert.equal(forkPlugin?.pluginCommands[0]?.commit, v3)
+  assert.equal(forkPlugin?.pluginCommands[0]?.mode, "mock")
+  assert.equal(forkPlugin?.pluginWorkspaces[0]?.writable, false)
+
+  const v4 = (await edit("chat:v4")).pluginWorkspaceCommits.chat!.commit
+  const revision = await swarm.approve(fork.id, evaluated.frontier, "owner")
+
+  assert.equal(revision.definition.plugins[0]!.commit, v3)
+  assert.equal(swarm.activeRevision().definition.plugins[0]!.commit, v3)
+  assert.equal(swarm.pluginDraftHead("chat"), v4)
+  const activation = ledger.all().findLast((event) => event.type === "swarm.revision.activated")
+  assert.equal(
+    (activation?.data as { revision: { definition: typeof definition } }).revision.definition.plugins[0]!.commit,
+    v3,
+  )
+
+  const nextDefinition = structuredClone(revision.definition)
+  nextDefinition.plugins[0]!.commit = v4
+  const nextReason = swarm.appendInput({ type: "swarm.evolution.requested", actor: "external/user" })
+  const nextProposal = await swarm.propose({
+    authoredBy: "builder",
+    definition: nextDefinition,
+    reasonEventIds: [nextReason.id],
+  })
+  assert.deepEqual(nextProposal.pluginCommits.chat?.map((item) => item.commit), [v4])
+
+  await edit("chat:v5")
+  assert.equal(adapter.runs.at(-1)?.pluginCommands[0]?.commit, v3)
+  assert.equal(adapter.runs.at(-1)?.pluginWorkspaces[0]?.draftCommit, v4)
 })
 
 test("a Revision snapshots Agent commits and Forks can start from any Revision or Proposal", async (t) => {
@@ -93,6 +166,8 @@ test("a Revision snapshots Agent commits and Forks can start from any Revision o
     id: "chat",
     command: "chat",
     mode: "live",
+    activeCommit: definition.plugins[0]!.commit,
+    draftCommit: proposal.definition.plugins[0]!.commit,
     exposedTo: ["builder"],
     ingressTargets: ["builder"],
     events: [],
@@ -143,7 +218,7 @@ test("the selected Fork becomes Main and later Main workspace commits continue a
     data: { request: "continue evolving while the Proposal is evaluated" },
   })
   const tail = await swarm.runAgentTurn({ agentId: "builder", inputEventId: continued.id })
-  const oldMainHead = tail.revision.commit
+  const oldMainHead = tail.workspaceCommit.commit
 
   const promoted = await swarm.approve(fork.id, forkResult.frontier, "owner")
 
@@ -199,9 +274,9 @@ test("a workspace conflict leaves the old Main intact", async (t) => {
   })
   const tail = await swarm.runAgentTurn({ agentId: "builder", inputEventId: continued.id })
 
-  await assert.rejects(swarm.approve(fork.id, forkResult.frontier, "owner"), /Cannot reapply workspace commit/)
+  await assert.rejects(swarm.approve(fork.id, forkResult.frontier, "owner"), /Cannot reapply commit for workspace/)
   assert.equal(swarm.activeRevision().id, revision.id)
-  assert.equal(swarm.agentHead("builder"), tail.revision.commit)
+  assert.equal(swarm.agentHead("builder"), tail.workspaceCommit.commit)
   assert.equal(swarm.fork(fork.id).status, "open")
   assert.equal(
     ledger.all().some(

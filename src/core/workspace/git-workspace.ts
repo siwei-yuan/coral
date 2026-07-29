@@ -3,14 +3,14 @@ import { chmod, mkdir, writeFile } from "node:fs/promises"
 import { dirname, isAbsolute, join, relative, resolve } from "node:path"
 import { digest, immutable } from "../canonical.ts"
 
-export interface WorkspaceRevision {
-  agentId: string
+export interface WorkspaceCommit {
+  workspaceId: string
   commit: string
   tree: string
 }
 
 export interface WorkspaceCheckout {
-  agentId: string
+  workspaceId: string
   repository: string
   worktree: string
   baseCommit: string
@@ -22,7 +22,7 @@ export interface ReappliedWorkspaceCommit {
 }
 
 export interface WorkspaceReapplyResult {
-  revision: WorkspaceRevision
+  head: WorkspaceCommit
   commits: ReappliedWorkspaceCommit[]
 }
 
@@ -36,8 +36,8 @@ export class GitWorkspaceStore {
     this.root = resolve(root)
   }
 
-  async initialize(agentId: string, files: WorkspaceFiles = {}): Promise<WorkspaceRevision> {
-    const repository = this.#repository(agentId)
+  async initialize(workspaceId: string, files: WorkspaceFiles = {}): Promise<WorkspaceCommit> {
+    const repository = this.#repository(workspaceId)
     await mkdir(dirname(repository), { recursive: true })
     await mkdir(repository)
     await git(repository, ["init", "-b", "main"])
@@ -47,55 +47,66 @@ export class GitWorkspaceStore {
       const target = safePath(repository, path)
       await mkdir(dirname(target), { recursive: true })
       await writeFile(target, content)
+      if (path.startsWith("bin/")) await chmod(target, 0o755)
     }
     await git(repository, ["add", "-A"])
     await git(repository, ["commit", "--allow-empty", "-m", "Initialize workspace"])
-    return this.revision(agentId, "HEAD")
+    return this.resolveCommit(workspaceId, "HEAD")
   }
 
-  async verify(agentId: string, commit: string): Promise<WorkspaceRevision> {
+  async verify(workspaceId: string, commit: string): Promise<WorkspaceCommit> {
     assertCommitId(commit)
-    const revision = await this.revision(agentId, `${commit}^{commit}`)
-    if (revision.commit !== commit) throw new Error(`unknown workspace commit for Agent ${agentId}: ${commit}`)
-    return revision
+    const resolved = await this.resolveCommit(workspaceId, `${commit}^{commit}`)
+    if (resolved.commit !== commit) throw new Error(`unknown commit for workspace ${workspaceId}: ${commit}`)
+    return resolved
   }
 
-  async isRoot(agentId: string, commit: string): Promise<boolean> {
-    await this.verify(agentId, commit)
-    const line = (await git(this.#repository(agentId), ["rev-list", "--parents", "-n", "1", commit])).trim()
+  async isRoot(workspaceId: string, commit: string): Promise<boolean> {
+    await this.verify(workspaceId, commit)
+    const line = (await git(this.#repository(workspaceId), ["rev-list", "--parents", "-n", "1", commit])).trim()
     return line.split(/\s+/).length === 1
   }
 
+  async rootCommit(workspaceId: string, commit: string): Promise<WorkspaceCommit> {
+    await this.verify(workspaceId, commit)
+    const roots = (await git(this.#repository(workspaceId), ["rev-list", "--max-parents=0", commit]))
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+    if (roots.length !== 1) throw new Error(`workspace must have exactly one initial commit: ${workspaceId}`)
+    return this.resolveCommit(workspaceId, roots[0]!)
+  }
+
   async reapplyTail(
-    agentId: string,
+    workspaceId: string,
     baseCommit: string,
     currentHead: string,
     targetHead: string,
     operationId: string,
   ): Promise<WorkspaceReapplyResult> {
     await Promise.all([
-      this.verify(agentId, baseCommit),
-      this.verify(agentId, currentHead),
-      this.verify(agentId, targetHead),
+      this.verify(workspaceId, baseCommit),
+      this.verify(workspaceId, currentHead),
+      this.verify(workspaceId, targetHead),
     ])
-    if (!(await this.#isAncestor(agentId, baseCommit, currentHead))) {
-      throw new Error(`Main workspace head does not descend from Fork source: ${agentId}`)
+    if (!(await this.#isAncestor(workspaceId, baseCommit, currentHead))) {
+      throw new Error(`Main workspace head does not descend from Fork source: ${workspaceId}`)
     }
-    if (!(await this.#isAncestor(agentId, baseCommit, targetHead))) {
-      throw new Error(`Fork workspace head does not descend from its source: ${agentId}`)
+    if (!(await this.#isAncestor(workspaceId, baseCommit, targetHead))) {
+      throw new Error(`Fork workspace head does not descend from its source: ${workspaceId}`)
     }
     if (currentHead === baseCommit || currentHead === targetHead) {
-      return { revision: await this.verify(agentId, targetHead), commits: [] }
+      return { head: await this.verify(workspaceId, targetHead), commits: [] }
     }
     if (targetHead === baseCommit) {
-      return { revision: await this.verify(agentId, currentHead), commits: [] }
+      return { head: await this.verify(workspaceId, currentHead), commits: [] }
     }
 
-    const commits = (await git(this.#repository(agentId), ["rev-list", "--reverse", `${baseCommit}..${currentHead}`]))
+    const commits = (await git(this.#repository(workspaceId), ["rev-list", "--reverse", `${baseCommit}..${currentHead}`]))
       .trim()
       .split("\n")
       .filter(Boolean)
-    const checkout = await this.open(agentId, targetHead, operationId)
+    const checkout = await this.open(workspaceId, targetHead, operationId)
     const reapplied: ReappliedWorkspaceCommit[] = []
     try {
       for (const sourceCommit of commits) {
@@ -107,62 +118,63 @@ export class GitWorkspaceStore {
         } catch (error) {
           await git(checkout.worktree, ["cherry-pick", "--abort"]).catch(() => undefined)
           const message = error instanceof Error ? error.message : String(error)
-          throw new Error(`Cannot reapply workspace commit for Agent ${agentId}: ${sourceCommit}: ${message}`)
+          throw new Error(`Cannot reapply commit for workspace ${workspaceId}: ${sourceCommit}: ${message}`)
         }
-        reapplied.push({ sourceCommit, appliedCommit: (await this.revision(agentId, "HEAD", checkout.worktree)).commit })
+        reapplied.push({ sourceCommit, appliedCommit: (await this.resolveCommit(workspaceId, "HEAD", checkout.worktree)).commit })
       }
-      return { revision: await this.revision(agentId, "HEAD", checkout.worktree), commits: reapplied }
+      return { head: await this.resolveCommit(workspaceId, "HEAD", checkout.worktree), commits: reapplied }
     } finally {
       await this.close(checkout)
     }
   }
 
-  async open(agentId: string, commit: string, runId: string): Promise<WorkspaceCheckout> {
-    const repository = this.#repository(agentId)
-    const worktree = join(this.root, ".worktrees", digest({ agentId, runId, commit }).slice(0, 24))
+  async open(workspaceId: string, commit: string, runId: string): Promise<WorkspaceCheckout> {
+    await this.verify(workspaceId, commit)
+    const repository = this.#repository(workspaceId)
+    const worktree = join(this.root, ".worktrees", digest({ workspaceId, runId, commit }).slice(0, 24))
     await mkdir(dirname(worktree), { recursive: true })
-    await this.#withRepository(agentId, () => git(repository, ["worktree", "add", "--detach", worktree, commit]))
-    return immutable({ agentId, repository, worktree, baseCommit: commit })
+    await this.#withRepository(workspaceId, () => git(repository, ["worktree", "add", "--detach", worktree, commit]))
+    return immutable({ workspaceId, repository, worktree, baseCommit: commit })
   }
 
-  async commit(checkout: WorkspaceCheckout, message: string): Promise<WorkspaceRevision> {
+  async commit(checkout: WorkspaceCheckout, message: string, authoredBy: string): Promise<WorkspaceCommit> {
     await git(checkout.worktree, ["add", "-A"])
     const status = await git(checkout.worktree, ["status", "--porcelain"])
-    if (status.trim() === "") return this.revision(checkout.agentId, checkout.baseCommit)
+    if (status.trim() === "") return this.resolveCommit(checkout.workspaceId, checkout.baseCommit)
 
     await git(checkout.worktree, ["commit", "-m", message], {
-      GIT_AUTHOR_NAME: `Agent ${checkout.agentId}`,
-      GIT_AUTHOR_EMAIL: `${checkout.agentId}@swarm.local`,
-      GIT_COMMITTER_NAME: `Agent ${checkout.agentId}`,
-      GIT_COMMITTER_EMAIL: `${checkout.agentId}@swarm.local`,
+      GIT_AUTHOR_NAME: `Agent ${authoredBy}`,
+      GIT_AUTHOR_EMAIL: `${authoredBy}@swarm.local`,
+      GIT_COMMITTER_NAME: `Agent ${authoredBy}`,
+      GIT_COMMITTER_EMAIL: `${authoredBy}@swarm.local`,
     })
-    return this.revision(checkout.agentId, "HEAD", checkout.worktree)
+    return this.resolveCommit(checkout.workspaceId, "HEAD", checkout.worktree)
   }
 
-  async retain(agentId: string, key: string, commit: string): Promise<void> {
+  async retain(workspaceId: string, key: string, commit: string): Promise<void> {
     const ref = `refs/kept/${digest(key).slice(0, 24)}`
-    await git(this.#repository(agentId), ["update-ref", ref, commit])
+    await git(this.#repository(workspaceId), ["update-ref", ref, commit])
   }
 
   async close(checkout: WorkspaceCheckout): Promise<void> {
-    await this.#withRepository(checkout.agentId, () =>
+    await this.#withRepository(checkout.workspaceId, () =>
       git(checkout.repository, ["worktree", "remove", "--force", checkout.worktree]),
     )
   }
 
-  async revision(agentId: string, ref: string, cwd = this.#repository(agentId)): Promise<WorkspaceRevision> {
+  async resolveCommit(workspaceId: string, ref: string, cwd = this.#repository(workspaceId)): Promise<WorkspaceCommit> {
     const commit = (await git(cwd, ["rev-parse", ref])).trim()
     const tree = (await git(cwd, ["rev-parse", `${ref}^{tree}`])).trim()
-    return immutable({ agentId, commit, tree })
+    return immutable({ workspaceId, commit, tree })
   }
 
-  async read(agentId: string, commit: string, path: string): Promise<string> {
+  async read(workspaceId: string, commit: string, path: string): Promise<string> {
     assertRelativePath(path)
-    return git(this.#repository(agentId), ["show", `${commit}:${path}`])
+    return git(this.#repository(workspaceId), ["show", `${commit}:${path}`])
   }
 
-  async exportTree(agentId: string, commit: string, destination: string): Promise<void> {
-    const repository = this.#repository(agentId)
+  async exportTree(workspaceId: string, commit: string, destination: string): Promise<void> {
+    const repository = this.#repository(workspaceId)
     await mkdir(destination, { recursive: true })
     const listing = await gitBuffer(repository, ["ls-tree", "-r", "-z", commit])
     for (const entry of listing.toString("utf8").split("\0").filter(Boolean)) {
@@ -177,16 +189,38 @@ export class GitWorkspaceStore {
     }
   }
 
-  #repository(agentId: string): string {
-    if (!/^[a-zA-Z0-9._-]+$/.test(agentId)) throw new Error(`invalid Agent ID: ${agentId}`)
-    return join(this.root, "agents", agentId)
+  async exportBundle(workspaceId: string, commit: string, destination: string): Promise<void> {
+    await this.verify(workspaceId, commit)
+    const repository = this.#repository(workspaceId)
+    await mkdir(dirname(destination), { recursive: true })
+    const exportRef = `refs/heads/corallum-export-${commit.slice(0, 16)}`
+    await this.#withRepository(workspaceId, async () => {
+      await git(repository, ["update-ref", exportRef, commit])
+      try {
+        await git(repository, ["bundle", "create", destination, exportRef])
+      } finally {
+        await git(repository, ["update-ref", "-d", exportRef])
+      }
+    })
   }
 
-  async #withRepository<T>(agentId: string, operation: () => Promise<T>): Promise<T> {
-    const previous = this.#repositoryOperations.get(agentId) ?? Promise.resolve()
+  async importBundle(workspaceId: string, bundle: string): Promise<void> {
+    const repository = this.#repository(workspaceId)
+    await mkdir(this.root, { recursive: true })
+    await mkdir(dirname(repository), { recursive: true })
+    await git(this.root, ["clone", "--bare", bundle, repository])
+  }
+
+  #repository(workspaceId: string): string {
+    if (!/^[a-zA-Z0-9._-]+$/.test(workspaceId)) throw new Error(`invalid workspace ID: ${workspaceId}`)
+    return join(this.root, workspaceId)
+  }
+
+  async #withRepository<T>(workspaceId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.#repositoryOperations.get(workspaceId) ?? Promise.resolve()
     const current = previous.then(operation, operation)
     this.#repositoryOperations.set(
-      agentId,
+      workspaceId,
       current.then(
         () => undefined,
         () => undefined,
@@ -195,8 +229,8 @@ export class GitWorkspaceStore {
     return current
   }
 
-  async #isAncestor(agentId: string, ancestor: string, descendant: string): Promise<boolean> {
-    return gitSucceeds(this.#repository(agentId), ["merge-base", "--is-ancestor", ancestor, descendant])
+  async #isAncestor(workspaceId: string, ancestor: string, descendant: string): Promise<boolean> {
+    return gitSucceeds(this.#repository(workspaceId), ["merge-base", "--is-ancestor", ancestor, descendant])
   }
 }
 

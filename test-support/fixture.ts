@@ -6,11 +6,13 @@ import {
   AgentRuntime,
   GitWorkspaceStore,
   Ledger,
+  PluginWorkspaceRuntime,
   Swarm,
   type ContextMessage,
   type HarnessAdapter,
   type HarnessInput,
   type HarnessPluginCommand,
+  type HarnessPluginWorkspace,
   type HarnessResult,
   type SwarmDefinition,
   type WorkspaceFiles,
@@ -21,9 +23,11 @@ export async function createFixture(t: TestContext) {
   t.after(() => rm(root, { recursive: true, force: true }))
 
   const workspaces = new GitWorkspaceStore(join(root, "workspaces"))
+  const pluginGit = new GitWorkspaceStore(join(root, "plugin-workspaces"))
   const ledger = new Ledger()
+  const pluginWorkspaces = new PluginWorkspaceRuntime({ ledger, workspaces: pluginGit })
   const adapter = new ScriptedHarnessAdapter()
-  const agentRuntime = new AgentRuntime({ ledger, workspaces, adapters: [adapter] })
+  const agentRuntime = new AgentRuntime({ ledger, workspaces, adapters: [adapter], pluginWorkspaces })
   const initial = await agentRuntime.initializeWorkspace(
     "builder",
     workspaceSeed("Build and improve the requested behavior."),
@@ -32,14 +36,10 @@ export async function createFixture(t: TestContext) {
     "reviewer",
     workspaceSeed("Review evidence and improve your own procedure."),
   )
+  const chatInitial = await pluginWorkspaces.initialize("chat", pluginSeed("chat"))
   const swarm = new Swarm({
     ledger,
     agentRuntime,
-    pluginExecutables: [
-      { id: "chat", executable: "/plugins/chat/bin/chat" },
-      { id: "screen", executable: "/plugins/screen/bin/screen" },
-      { id: "scheduler", executable: "/plugins/scheduler/bin/scheduler" },
-    ],
   })
   const definition: SwarmDefinition = {
     agents: [
@@ -48,7 +48,13 @@ export async function createFixture(t: TestContext) {
     ],
     routes: [{ from: "builder", to: "reviewer" }],
     pluginIngress: [{ plugin: "chat", ingressTo: "builder" }],
-    plugins: [{ id: "chat", command: "chat", exposedTo: ["builder"], mode: "live" }],
+    plugins: [{
+      id: "chat",
+      command: "chat",
+      commit: chatInitial.commit,
+      exposedTo: ["builder"],
+      mode: "live",
+    }],
     tests: [
       {
         id: "core-behavior",
@@ -71,7 +77,28 @@ export async function createFixture(t: TestContext) {
     agentHeads: { builder: initial.commit, reviewer: reviewerInitial.commit },
     human: "owner",
   })
-  return { root, workspaces, ledger, adapter, agentRuntime, swarm, definition, initial, reviewerInitial, revision }
+  return {
+    root,
+    workspaces,
+    pluginGit,
+    pluginWorkspaces,
+    chatInitial,
+    ledger,
+    adapter,
+    agentRuntime,
+    swarm,
+    definition,
+    initial,
+    reviewerInitial,
+    revision,
+  }
+}
+
+export function pluginSeed(id: string): WorkspaceFiles {
+  return {
+    [`bin/${id}.mjs`]: `#!/usr/bin/env node\nconsole.log(${JSON.stringify(`${id}:v1`)})\n`,
+    "runtime.ts": `export const version = ${JSON.stringify(`${id}:v1`)}\n`,
+  }
 }
 
 export function workspaceSeed(initialContext: string): WorkspaceFiles {
@@ -124,6 +151,7 @@ export interface RecordedRun {
   agentId: string
   context: ContextMessage[]
   pluginCommands: HarnessPluginCommand[]
+  pluginWorkspaces: HarnessPluginWorkspace[]
 }
 
 class ScriptedHarnessAdapter implements HarnessAdapter {
@@ -138,9 +166,16 @@ class ScriptedHarnessAdapter implements HarnessAdapter {
     inputEvents,
     context,
     pluginCommands,
+    pluginWorkspaces,
     readWorkspace,
   }: HarnessInput): Promise<HarnessResult> {
-    this.runs.push({ agentId, context, pluginCommands })
+    this.runs.push({ agentId, context, pluginCommands, pluginWorkspaces })
+    if (inputEvents[0]?.type === "plugin.workspace.improvement.requested") {
+      const input = inputEvents[0].data as { pluginId?: string; version?: string }
+      const plugin = pluginWorkspaces.find((workspace) => workspace.id === input.pluginId)
+      if (!plugin?.writable) throw new Error(`Plugin workspace is not writable: ${input.pluginId}`)
+      await writeFile(join(plugin.directory, "runtime.ts"), `export const version = ${JSON.stringify(input.version)}\n`)
+    }
     if (inputEvents[0]?.type === "agent.workspace.improvement.requested") {
       await appendFile(join(workingDirectory, "AGENTS.md"), "Evolved responsibility: verify the result.\n")
       await appendFile(join(workingDirectory, "context", "initial.md"), "Use evidence from prior Events.\n")

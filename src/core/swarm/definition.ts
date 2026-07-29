@@ -15,6 +15,7 @@ export interface PluginIngress {
 export interface PluginBinding {
   id: string
   command: string
+  commit: string
   exposedTo: string[]
   mode: string
 }
@@ -45,7 +46,13 @@ export interface AgentSwarmView {
     receivesFromPlugins: string[]
   }>
   routes: Route[]
-  plugins: Array<{ id: string; command: string; mode: string }>
+  plugins: Array<{
+    id: string
+    command: string
+    mode: string
+    activeCommit: string
+    draftCommit: string
+  }>
 }
 
 export function validateDefinition(definition: unknown): SwarmDefinition {
@@ -71,7 +78,9 @@ export function validateDefinition(definition: unknown): SwarmDefinition {
   }
   const pluginIds = new Set<string>()
   for (const plugin of copy.plugins) {
-    if (!plugin.id || !plugin.command) throw new Error("Every Plugin requires id and command")
+    if (!plugin.id || !plugin.command || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(plugin.commit)) {
+      throw new Error("Every Plugin requires id, command, and exact Git commit")
+    }
     if (pluginIds.has(plugin.id)) throw new Error(`duplicate Plugin: ${plugin.id}`)
     if (!Array.isArray(plugin.exposedTo) || plugin.exposedTo.some((agentId) => !ids.has(agentId))) {
       throw new Error("Plugin exposure Agents must exist")
@@ -108,6 +117,7 @@ export function projectAgentSwarmView(
   source: AgentSwarmView["source"],
   scope: Scope,
   pluginBindings: PluginBinding[],
+  pluginDraftHeads: Record<string, string> = {},
 ): AgentSwarmView {
   findAgent(definition, self)
   return immutable({
@@ -127,6 +137,12 @@ export function projectAgentSwarmView(
     routes: definition.routes,
     plugins: pluginBindings
       .filter((plugin) => plugin.exposedTo.includes(self))
-      .map((plugin) => ({ id: plugin.id, command: plugin.command, mode: plugin.mode })),
+      .map((plugin) => ({
+        id: plugin.id,
+        command: plugin.command,
+        mode: plugin.mode,
+        activeCommit: plugin.commit,
+        draftCommit: pluginDraftHeads[plugin.id] ?? plugin.commit,
+      })),
   })
 }

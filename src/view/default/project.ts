@@ -1,6 +1,6 @@
 import type { LedgerEvent } from "../../core/ledger/ledger.ts"
 import type { SwarmDefinition } from "../../core/swarm/definition.ts"
-import type { SwarmRevision, WorkspaceCommitRef } from "../../core/swarm/revision.ts"
+import type { CommitEvidence, SwarmRevision } from "../../core/swarm/revision.ts"
 
 export interface RevisionView {
   id: string
@@ -9,7 +9,8 @@ export interface RevisionView {
   sourceForkId: string | null
   definition: SwarmDefinition
   agentHeads: Record<string, string>
-  workspaceCommits: Record<string, WorkspaceCommitRef[]>
+  workspaceCommits: Record<string, CommitEvidence[]>
+  pluginCommits: Record<string, CommitEvidence[]>
   ledgerFrontier: number
   activatedAt: string
   active: boolean
@@ -21,7 +22,8 @@ export interface ProposalView {
   authoredBy: string
   definition: SwarmDefinition
   agentHeads: Record<string, string>
-  workspaceCommits: Record<string, WorkspaceCommitRef[]>
+  workspaceCommits: Record<string, CommitEvidence[]>
+  pluginCommits: Record<string, CommitEvidence[]>
   eventId: string
   seq: number
 }
@@ -60,6 +62,8 @@ export interface PluginView {
   id: string
   command: string
   mode: string
+  activeCommit: string
+  draftCommit: string
   exposedTo: string[]
   ingressTargets: string[]
   events: PluginEventView[]
@@ -96,7 +100,8 @@ export function projectLedger(events: LedgerEvent[]): DefaultViewModel {
       authoredBy: string
       definition: SwarmDefinition
       agentHeads: Record<string, string>
-      workspaceCommits: Record<string, WorkspaceCommitRef[]>
+      workspaceCommits: Record<string, CommitEvidence[]>
+      pluginCommits: Record<string, CommitEvidence[]>
     }
     return [{
       id: data.proposalId,
@@ -105,6 +110,7 @@ export function projectLedger(events: LedgerEvent[]): DefaultViewModel {
       definition: data.definition,
       agentHeads: data.agentHeads,
       workspaceCommits: data.workspaceCommits,
+      pluginCommits: data.pluginCommits,
       eventId: event.id,
       seq: event.seq,
     }]
@@ -150,6 +156,8 @@ export function projectLedger(events: LedgerEvent[]): DefaultViewModel {
     id: binding.id,
     command: binding.command,
     mode: binding.mode,
+    activeCommit: binding.commit,
+    draftCommit: pluginDraftCommit(ordered, binding.id, binding.commit),
     exposedTo: binding.exposedTo,
     ingressTargets: activeRevision.definition.pluginIngress
       .filter((item) => item.plugin === binding.id)
@@ -171,6 +179,22 @@ export function projectLedger(events: LedgerEvent[]): DefaultViewModel {
 
   const activeWorkspaceHeads = activeRevision ? activeHeads(activeRevision, ordered) : {}
   return { activeRevision, activeWorkspaceHeads, revisions, proposals, forks, plugins, events: ordered }
+}
+
+function pluginDraftCommit(events: LedgerEvent[], pluginId: string, fallback: string): string {
+  for (const event of [...events].reverse()) {
+    if (
+      event.scope.kind !== "active" ||
+      (event.type !== "plugin.workspace.initialized" && event.type !== "plugin.workspace.committed")
+    ) {
+      continue
+    }
+    const data = event.data as { pluginId?: unknown; commit?: unknown; importedHead?: unknown }
+    if (data.pluginId !== pluginId) continue
+    if (typeof data.importedHead === "string") return data.importedHead
+    if (typeof data.commit === "string") return data.commit
+  }
+  return fallback
 }
 
 function isPluginEvent(event: LedgerEvent, pluginId: string): boolean {

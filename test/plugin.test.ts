@@ -6,7 +6,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 import { ChatRuntime, SchedulerRuntime, ScreenRuntime } from "../src/index.ts"
-import { createFixture } from "../test-support/fixture.ts"
+import { createFixture, pluginSeed } from "../test-support/fixture.ts"
 
 const execute = promisify(execFile)
 
@@ -117,9 +117,16 @@ test("Scheduler CLI owns recurring notes and its inbound Events follow declared 
     scheduledAt: schedule.nextAt,
   }])
 
-  const { swarm, definition } = await createFixture(t)
+  const { swarm, definition, pluginWorkspaces } = await createFixture(t)
+  const schedulerInitial = await pluginWorkspaces.initialize("scheduler", pluginSeed("scheduler"))
   const proposed = structuredClone(definition)
-  proposed.plugins.push({ id: "scheduler", command: "scheduler", exposedTo: ["builder", "reviewer"], mode: "live" })
+  proposed.plugins.push({
+    id: "scheduler",
+    command: "scheduler",
+    commit: schedulerInitial.commit,
+    exposedTo: ["builder", "reviewer"],
+    mode: "live",
+  })
   proposed.pluginIngress.push(
     { plugin: "scheduler", ingressTo: "builder" },
     { plugin: "scheduler", ingressTo: "reviewer" },

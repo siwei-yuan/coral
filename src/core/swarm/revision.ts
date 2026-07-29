@@ -2,7 +2,7 @@ import type { LedgerEvent, Scope } from "../ledger/ledger.ts"
 import { sameScope } from "../ledger/ledger.ts"
 import type { PluginBinding, SwarmDefinition } from "./definition.ts"
 
-export interface WorkspaceCommitRef {
+export interface CommitEvidence {
   commit: string
   eventId: string
 }
@@ -14,7 +14,8 @@ export interface SwarmRevision {
   sourceForkId: string | null
   definition: SwarmDefinition
   agentHeads: Record<string, string>
-  workspaceCommits: Record<string, WorkspaceCommitRef[]>
+  workspaceCommits: Record<string, CommitEvidence[]>
+  pluginCommits: Record<string, CommitEvidence[]>
   ledgerFrontier: number
   eventId: string
 }
@@ -26,7 +27,8 @@ export interface SwarmProposal {
   reasonEventIds: string[]
   definition: SwarmDefinition
   agentHeads: Record<string, string>
-  workspaceCommits: Record<string, WorkspaceCommitRef[]>
+  workspaceCommits: Record<string, CommitEvidence[]>
+  pluginCommits: Record<string, CommitEvidence[]>
   ledgerFrontier: number
   eventId: string
 }
@@ -55,7 +57,8 @@ export interface ForkSource {
   revisionId: string
   definition: SwarmDefinition
   agentHeads: Record<string, string>
-  workspaceCommits: Record<string, WorkspaceCommitRef[]>
+  workspaceCommits: Record<string, CommitEvidence[]>
+  pluginCommits: Record<string, CommitEvidence[]>
   ledgerFrontier: number
 }
 
@@ -74,7 +77,7 @@ export function proposalWorkspaceCommits(
   heads: Record<string, string>,
   events: LedgerEvent[],
   afterSeq: number,
-): Record<string, WorkspaceCommitRef[]> {
+): Record<string, CommitEvidence[]> {
   const commits = collectWorkspaceCommits(events, afterSeq, { kind: "active" })
   const relevantAgents = new Set([
     ...base.definition.agents.map((agent) => agent.id),
@@ -110,8 +113,8 @@ export function collectWorkspaceCommits(
   events: LedgerEvent[],
   afterSeq: number,
   scope: Scope,
-): Record<string, WorkspaceCommitRef[]> {
-  const commits: Record<string, WorkspaceCommitRef[]> = {}
+): Record<string, CommitEvidence[]> {
+  const commits: Record<string, CommitEvidence[]> = {}
   for (const event of events) {
     if (
       event.seq <= afterSeq ||
@@ -131,10 +134,72 @@ export function collectWorkspaceCommits(
   return commits
 }
 
+export function proposalPluginCommits(
+  base: SwarmRevision,
+  definition: SwarmDefinition,
+  events: LedgerEvent[],
+  throughSeq: number,
+): Record<string, CommitEvidence[]> {
+  const commits = collectPluginCommits(events, base.ledgerFrontier, throughSeq)
+  const relevantPlugins = new Set([
+    ...base.definition.plugins.map((plugin) => plugin.id),
+    ...definition.plugins.map((plugin) => plugin.id),
+  ])
+  for (const pluginId of Object.keys(commits)) {
+    if (!relevantPlugins.has(pluginId)) delete commits[pluginId]
+  }
+
+  for (const plugin of definition.plugins) {
+    const baseCommit = base.definition.plugins.find((candidate) => candidate.id === plugin.id)?.commit
+    if (plugin.commit === baseCommit) continue
+    const evidence = commits[plugin.id] ?? []
+    if (!evidence.some((item) => item.commit === plugin.commit)) {
+      const backingEvent = events.find((event) => {
+        if (
+          event.seq > throughSeq ||
+          (event.type !== "plugin.workspace.initialized" && event.type !== "plugin.workspace.committed")
+        ) {
+          return false
+        }
+        const data = event.data as { pluginId?: unknown; commit?: unknown; importedHead?: unknown }
+        return data.pluginId === plugin.id && (data.commit === plugin.commit || data.importedHead === plugin.commit)
+      })
+      if (!backingEvent) throw new Error(`Plugin pin has no committed workspace Event: ${plugin.id}`)
+      evidence.push({ commit: plugin.commit, eventId: backingEvent.id })
+      commits[plugin.id] = evidence
+    }
+  }
+  return commits
+}
+
+export function collectPluginCommits(
+  events: LedgerEvent[],
+  afterSeq: number,
+  throughSeq = Number.POSITIVE_INFINITY,
+): Record<string, CommitEvidence[]> {
+  const commits: Record<string, CommitEvidence[]> = {}
+  for (const event of events) {
+    if (
+      event.seq <= afterSeq ||
+      event.seq > throughSeq ||
+      event.scope.kind !== "active" ||
+      (event.type !== "plugin.workspace.initialized" && event.type !== "plugin.workspace.committed")
+    ) {
+      continue
+    }
+    const data = event.data as { pluginId?: unknown; commit?: unknown }
+    if (typeof data.pluginId !== "string" || typeof data.commit !== "string") continue
+    const pluginCommits = commits[data.pluginId] ?? []
+    commits[data.pluginId] = pluginCommits
+    pluginCommits.push({ commit: data.commit, eventId: event.id })
+  }
+  return commits
+}
+
 export function mergeWorkspaceCommits(
-  ...groups: Array<Record<string, WorkspaceCommitRef[]>>
-): Record<string, WorkspaceCommitRef[]> {
-  const merged: Record<string, WorkspaceCommitRef[]> = {}
+  ...groups: Array<Record<string, CommitEvidence[]>>
+): Record<string, CommitEvidence[]> {
+  const merged: Record<string, CommitEvidence[]> = {}
   for (const group of groups) {
     for (const [agentId, commits] of Object.entries(group)) {
       const agentCommits = merged[agentId] ?? []

@@ -49,6 +49,7 @@
     "actor": "agents/actor",
     "refiner": "agents/refiner"
   },
+  "pluginBundles": {},
   "source": {
     "revisionId": null,
     "agentHeads": {}

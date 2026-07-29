@@ -30,9 +30,9 @@
       { "plugin": "scheduler", "ingressTo": "auditor" }
     ],
     "plugins": [
-      { "id": "chat", "command": "chat", "exposedTo": ["chat-agent"], "mode": "live" },
-      { "id": "screen", "command": "screen", "exposedTo": ["memory-builder", "proactivity"], "mode": "live" },
-      { "id": "scheduler", "command": "scheduler", "exposedTo": ["chat-agent", "memory-builder", "proactivity", "auditor"], "mode": "live" }
+      { "id": "chat", "command": "chat", "commit": "75f48a8e15835ea3e689f5a6596d1402c94b4fff", "exposedTo": ["chat-agent"], "mode": "live" },
+      { "id": "screen", "command": "screen", "commit": "b973029dcd51fea90c151f0da8fdf8fbd58ee05d", "exposedTo": ["memory-builder", "proactivity"], "mode": "live" },
+      { "id": "scheduler", "command": "scheduler", "commit": "3b5d160fdc68917468b65ba3fc6382d12fd0974c", "exposedTo": ["chat-agent", "memory-builder", "proactivity", "auditor"], "mode": "live" }
     ],
     "tests": [
       {
@@ -74,6 +74,11 @@
     "memory-builder": "agents/memory-builder",
     "proactivity": "agents/proactivity",
     "auditor": "agents/auditor"
+  },
+  "pluginBundles": {
+    "chat": "plugins/chat.bundle",
+    "screen": "plugins/screen.bundle",
+    "scheduler": "plugins/scheduler.bundle"
   },
   "source": {
     "revisionId": null,

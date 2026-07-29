@@ -23,6 +23,15 @@ export interface PluginExecutable {
 export interface HarnessPluginCommand extends PluginExecutable {
   command: string
   mode: string
+  commit: string
+}
+
+export interface HarnessPluginWorkspace {
+  id: string
+  directory: string
+  activeCommit: string
+  draftCommit: string
+  writable: boolean
 }
 
 export interface HarnessInput {
@@ -33,6 +42,7 @@ export interface HarnessInput {
   inputEvents: LedgerEvent[]
   context: ContextMessage[]
   pluginCommands: HarnessPluginCommand[]
+  pluginWorkspaces: HarnessPluginWorkspace[]
   readWorkspace(agentId: string, path: string): Promise<string>
 }
 

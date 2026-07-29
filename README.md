@@ -10,14 +10,14 @@ layers preserve the history of that growth.
 The runtime has nine concepts:
 
 1. `Ledger` records high-level causal Events in one hash chain.
-2. `GitWorkspaceStore` gives each Agent a plain writable Git workspace.
+2. `GitWorkspaceStore` provides plain Git workspaces for Agent and Plugin code.
 3. `WorkspaceBridge` runs the Agent-owned `context.ts` from that workspace.
 4. `HarnessAdapter` drives a native Agent Harness.
 5. `AgentRuntime` records one logical turn and any resulting workspace commit.
 6. `Swarm` snapshots Main as Revisions, creates isolated whole-Swarm Forks,
    and atomically promotes an exact Fork frontier after Human approval.
-7. Plugins own external runtimes and expose shell CLIs to authorized Agents.
-   Chat, Screen, and Scheduler are the first concrete bundles.
+7. Plugins own external runtimes and Git-backed code, expose shell CLIs to
+   authorized Agents, and activate only through exact Swarm Revision pins.
 8. `SnapshotStore` exports and imports complete reusable Swarm blueprints under
    `snapshots/`.
 9. `DefaultView` projects the Ledger into a local Human control surface for
@@ -33,6 +33,7 @@ src/
 ├── core/
 │   ├── ledger/
 │   ├── workspace/
+│   ├── plugin/
 │   ├── agent/
 │   └── swarm/
 ├── harness/
@@ -45,9 +46,10 @@ plugins/
 └── scheduler/
 ```
 
-Workspace knows only Git. Agent combines Workspace and a Harness. Swarm
-combines Agents and commit IDs. Plugins and Snapshots remain outside Core.
-The code is strict TypeScript executed directly by Node.js.
+Workspace knows only Git. Agent combines Workspace and a Harness. Plugin Core
+adds commit Events to Plugin workspaces. Swarm combines Agents and exact commit
+IDs. Concrete Plugin runtimes and Snapshots remain outside Core. The code is
+strict TypeScript executed directly by Node.js.
 
 This first implementation keeps the Ledger and Swarm runtime in process while
 using real Git repositories and worktrees. Persistence and native Harness
@@ -76,10 +78,14 @@ Definition declares allowed Agent-to-Agent edges; Main and Forks validate those
 edges and deliver each message to its recipients. Agents see the current Agent
 set and communication graph in their runtime Swarm view.
 
-Each Plugin binding names one shell command and the Agents allowed to see it.
-The Harness receives only those command descriptors; no Plugin file is copied
-into an Agent workspace. Plugin CLI calls remain Harness operations. Chat user
-input and new Screen activities enter the Swarm as `communication.sent`.
+Each Plugin binding pins one exact Git commit, names one shell command, and
+declares the Agents allowed to call it. On Main, an authorized Agent receives
+the CLI from the active pin plus its editable Plugin draft workspace. The draft
+may accumulate commits without changing active execution. A Proposal Fork sees
+only its pinned Plugin code in mock mode; Human approval of the complete Swarm
+Revision activates that pin. No Plugin file is copied into an Agent workspace.
+Plugin CLI calls remain Harness operations. Chat user input and new Screen
+activities enter the Swarm as `communication.sent`.
 Agent output goes directly through a Plugin CLI and its runtime; it is not an
 outbound Ledger Event. Scheduler configuration also goes through its CLI;
 schedule firings enter as inbound Communications carrying the exact recurring
@@ -104,8 +110,9 @@ See [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Snapshots
 
-A Snapshot contains the complete Swarm Definition plus the seed workspace tree
-for every Agent. Agent responsibilities, instructions, and initial context live
+A Snapshot contains the complete Swarm Definition, the seed workspace tree for
+every Agent, and a Git bundle carrying every exact Plugin commit pinned by the
+Definition. Agent responsibilities, instructions, and initial context live
 inside that Agent's workspace, where the Agent can change them through ordinary
 Git commits. The workspace-owned `context.ts` decides how those files, current
 input Events, and a runtime-generated compact Swarm view are assembled for the

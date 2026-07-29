@@ -48,6 +48,7 @@ remain in their native operational stores.
 ```text
 core/ledger
 core/workspace
+core/plugin      -> Plugin Git workspace + commit Events
 core/agent       -> Ledger + Workspace + Harness contract
 core/swarm       -> Agent + Ledger + commit IDs
 harness
@@ -189,10 +190,11 @@ of the current implementation.
 ## Plugins
 
 A Plugin owns an external runtime and exposes one shell command to selected
-Agents. Its implementation and runtime data remain outside Agent workspaces.
-`SwarmDefinition` declares the command, mode, and exact Agents that may see it;
-the Harness receives those command descriptors for the turn. The current
-implementation does not claim OS-level command isolation.
+Agents. Its code lives in its own Git workspace; mutable runtime data remains
+outside both Plugin and Agent workspaces. `SwarmDefinition` pins the exact code
+commit and declares the command, mode, and Agents that may call it. The Harness
+receives a command resolved from `bin/<command>.mjs` at that pinned checkout.
+The current implementation does not claim OS-level command isolation.
 
 CLI calls are Harness operations, not Ledger Events. Plugin Events are inbound:
 Chat Runtime turns user input into a Communication Event, while Screen Runtime
@@ -249,23 +251,26 @@ storage for trajectory excerpts, and Plugin stores for artifacts such as raw
 screenshots. Alternative open-source Views can use the same Ledger projection
 or build their own without changing Core.
 
-### Designed next: Git-backed Plugin evolution
+### Git-backed Plugin evolution
 
-Plugin versioning is required before generic Snapshot deployment. It follows
-the same draft-versus-active separation as Agent self-evolution, without adding
-an independent Plugin approval system.
+Plugin evolution follows the same draft-versus-active separation as Agent
+self-evolution, without adding an independent Plugin approval system.
 
-Each Plugin owns one Git-backed code workspace. Agents listed in that Plugin's
-`exposedTo` set can see and edit its draft checkout directly. A successful edit
-must create a Git commit and a high-level `plugin.workspace.committed` Event
-attributed to the Agent. The commit immediately advances the Plugin's draft
-head but never changes the code used by the active Swarm. Initialization is
-similarly backed by a root commit and `plugin.workspace.initialized` Event.
+Each Plugin owns one Git-backed code workspace and one serialized draft head.
+An Agent may see and edit that draft when it either receives that Plugin's
+ingress or appears in `exposedTo`; no second edit-permission field exists. A
+successful edit creates a Git commit and a high-level
+`plugin.workspace.committed` Event attributed to the Agent. The commit
+immediately advances the draft head but never changes the active code.
+Initialization is backed by `plugin.workspace.initialized`.
 
 The active `SwarmDefinition` pins an exact Plugin commit. Runtime CLIs and
 inbound runtimes execute from an isolated checkout of that pinned commit, never
-from the editable draft checkout. An Agent may therefore advance Chat from
-`v1 -> v2 -> v3` while the active Swarm continues to execute `v1`.
+from the editable draft checkout. For a Main turn, the Harness receives the
+pinned CLI plus the editable draft directory as two distinct paths. For a Fork,
+it receives only the proposed pin as a read-only workspace and the CLI is in
+mock mode. An Agent may therefore advance Chat from `v1 -> v2 -> v3` while the
+active Swarm continues to execute `v1`.
 
 When an Agent proposes a complete Swarm Revision, it may change Chat's pin from
 `v1` directly to `v3`. Proposal Forks evaluate the exact pinned Plugin code in
@@ -273,6 +278,12 @@ mock/isolated mode. Plugin code is read-only inside those evaluation Forks in
 the first version: further Plugin edits require another Main draft commit and a
 later Proposal. Human approval activates the selected Swarm Revision and all of
 its Plugin pins together. There is no independent Plugin activation Event.
+
+A Proposal uses literal commit IDs only. A turn cannot edit a Plugin and refer
+to that newly created commit in its own `swarm.revision.requested` Event: the
+commit does not become proposal-visible until the turn finishes. The next turn
+sees the new draft head and may pin it. This keeps the protocol free of symbolic
+`latest` or `draft` references.
 
 Commits skipped by a Proposal, such as `v2`, remain ordinary auditable Git
 history. Commits made after a Proposal remain draft candidates for a later
@@ -293,11 +304,14 @@ A Snapshot is a portable, reusable Swarm blueprint:
 ```text
 snapshot.json
 agents/<agent-id>/...
+plugins/<plugin-id>.bundle
 ```
 
 `snapshot.json` contains the complete Definition and source revision evidence;
-each Agent directory contains its seed workspace tree. Import initializes new
-Agent Git repositories and returns the Definition plus their initial heads.
+each Agent directory contains its seed workspace tree, while `pluginBundles`
+maps every Plugin ID to a Git bundle containing the exact commit pinned by the
+Definition. Import initializes Agent repositories and imports Plugin Git
+objects without changing their commit IDs.
 
 The Snapshot as a whole therefore initializes Agent roles and context even
 though those fields are not duplicated inside `SwarmDefinition`.
@@ -307,6 +321,8 @@ secrets, Plugin connections, and low-level trajectories. It is a reusable
 starting state, not a replacement for the Ledger or an exact forensic archive
 of a running instance.
 
-Direct Snapshot deployment remains deferred until every referenced Plugin is
-backed by deployable Git objects and the Definition pins its exact commit. A
-deployment must never resolve a mutable local Plugin folder by name alone.
+Snapshot import now resolves exact Plugin code. A generic deployment runner is
+still separate work: it must start each external Plugin runtime from the same
+pinned checkout and supply operational state and secrets without putting them
+in the Snapshot. It must never resolve a mutable local Plugin folder by name
+alone.
