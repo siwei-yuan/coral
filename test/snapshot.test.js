@@ -10,9 +10,7 @@ test("a Snapshot round-trips the complete Definition and Agent workspace seeds",
   const { root, swarm, workspaces } = await createFixture(t)
   const revision = swarm.activeRevision()
   const snapshots = new SnapshotStore(join(root, "snapshots"))
-  const agentHeads = Object.fromEntries(
-    Object.entries(revision.agents).map(([agentId, release]) => [agentId, release.workspaceCommit]),
-  )
+  const agentHeads = revision.agentHeads
 
   await snapshots.export("baseline", {
     definition: revision.definition,
@@ -53,7 +51,11 @@ test("the bundled Continual Harness snapshot is a bootstrappable Actor-Refiner S
     /author a complete candidate `SwarmDefinition`/,
   )
   assert.match(
-    await workspaces.read("refiner", imported.agentHeads.refiner, "context/README.md"),
+    await workspaces.read("refiner", imported.agentHeads.refiner, "context/initial.md"),
     /refinement window/,
+  )
+  assert.match(
+    await workspaces.read("refiner", imported.agentHeads.refiner, "context.ts"),
+    /export default async function compose/,
   )
 })

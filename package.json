@@ -8,6 +8,6 @@
     "check": "npm test"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.18"
   }
 }

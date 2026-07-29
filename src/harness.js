@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto"
+import { WorkspaceBridge } from "./context.js"
 
 export class AgentRuntime {
-  constructor({ ledger, workspaces, adapters }) {
+  constructor({ ledger, workspaces, adapters, workspaceBridge = new WorkspaceBridge() }) {
     this.ledger = ledger
     this.workspaces = workspaces
     this.adapters = new Map(adapters.map((adapter) => [adapter.id, adapter]))
+    this.workspaceBridge = workspaceBridge
   }
 
   async runTurn({ agent, baseCommit, scope, inputEvents }) {
@@ -13,6 +15,7 @@ export class AgentRuntime {
     if (inputEvents.length === 0) throw new Error("Agent turn requires at least one input Event")
 
     const turnId = randomUUID()
+    if (!baseCommit) throw new Error("Agent turn requires a workspace commit")
     const checkout = await this.workspaces.open(agent.id, baseCommit, turnId)
     try {
       let outcome = "failed"
@@ -21,12 +24,19 @@ export class AgentRuntime {
       let failure
 
       try {
+        const context = await this.workspaceBridge.compose(checkout.worktree, {
+          turnId,
+          agentId: agent.id,
+          scope,
+          inputEvents,
+        })
         const result = await adapter.run({
           turnId,
           agentId: agent.id,
           scope,
           workingDirectory: checkout.worktree,
           inputEvents,
+          context,
         })
         outcome = result.outcome ?? "completed"
         emissions = result.events ?? []
@@ -76,6 +86,7 @@ export class AgentRuntime {
           agentId: agent.id,
           inputEventIds: inputEvents.map((event) => event.id),
           outputEventIds: outputEvents.map((event) => event.id),
+          inputWorkspaceCommit: baseCommit,
           workspaceCommit: revision.commit,
           outcome,
           ...(trajectory ? { trajectory } : {}),
