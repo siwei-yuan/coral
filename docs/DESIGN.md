@@ -176,6 +176,21 @@ schemas. Plugin operations are not Ledger Events merely because they occurred.
 Only the active Swarm may use live external egress. Forks use disabled,
 read-only, sandbox, or mock bindings.
 
+### Deferred: Plugin-owned evolution
+
+Plugin versioning is intentionally outside the current implementation. A future
+Plugin may own an independent Git-backed folder containing its implementation,
+Agent-facing contract, and optional executable helpers. Agents may inspect the
+pinned folder read-only; a Plugin never initializes or modifies an Agent
+workspace.
+
+A future `SwarmDefinition` and Revision may pin the exact Plugin commit alongside
+Agent workspace commits. Changing that pin would then be a Swarm-level change
+that follows the normal Proposal, Fork evaluation, and Human activation path.
+Mutable operational state such as screenshots, OCR output, App sessions,
+credentials, cursors, and caches remains Plugin-owned runtime data outside that
+Git commit. This is a recorded direction, not a current Core contract.
+
 ## Snapshots
 
 A Snapshot is a portable, reusable Swarm blueprint:
