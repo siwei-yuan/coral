@@ -36,3 +36,12 @@ export { ChatRuntime } from "../plugins/chat/runtime.ts"
 export { ScreenRuntime } from "../plugins/screen/runtime.ts"
 export type { ScreenActivity, ScreenActivityInput, ScreenCaptureInput } from "../plugins/screen/runtime.ts"
 export { SnapshotStore } from "./snapshots/store.ts"
+export { DefaultView, projectLedger, renderDefaultView } from "./view/default/index.ts"
+export type {
+  DefaultViewModel,
+  DefaultViewServer,
+  ForkTestView,
+  ForkView,
+  ProposalView,
+  RevisionView,
+} from "./view/default/index.ts"

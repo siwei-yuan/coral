@@ -10,13 +10,13 @@ export interface WorkspaceCommitRef {
 export interface SwarmRevision {
   id: string
   parentRevision: string | null
-  proposalId: string | null
-  selectedForkId: string | null
+  sourceProposalId: string | null
+  sourceForkId: string | null
   definition: SwarmDefinition
   agentHeads: Record<string, string>
   workspaceCommits: Record<string, WorkspaceCommitRef[]>
   ledgerFrontier: number
-  frozenEventId: string
+  eventId: string
 }
 
 export interface SwarmProposal {
@@ -31,12 +31,6 @@ export interface SwarmProposal {
   eventId: string
 }
 
-export interface ForkResult {
-  testId: string
-  passed: boolean
-  evidenceEventIds: string[]
-}
-
 export interface ForkSnapshot {
   id: string
   sourceKind: "revision" | "proposal"
@@ -45,22 +39,23 @@ export interface ForkSnapshot {
   agentHeads: Record<string, string>
   pluginBindings: PluginBinding[]
   scope: Scope
-  status: "running" | "completed" | "promoted"
+  status: "open" | "approved" | "denied"
+  frontier: number
   createdEventId: string
-  evaluationEventId: string | null
-  results: ForkResult[] | null
 }
 
 export interface MutableFork extends ForkSnapshot {
-  ledgerFrontier: number
+  sourceFrontier: number
 }
 
 export interface ForkSource {
   kind: "revision" | "proposal"
+  id: string
   eventId: string
   revisionId: string
   definition: SwarmDefinition
   agentHeads: Record<string, string>
+  workspaceCommits: Record<string, WorkspaceCommitRef[]>
   ledgerFrontier: number
 }
 

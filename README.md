@@ -7,7 +7,7 @@ The name comes from the complete skeleton built by a coral colony: individual
 polyps grow their own corallites, the colony grows as one structure, and its
 layers preserve the history of that growth.
 
-The runtime has eight concepts:
+The runtime has nine concepts:
 
 1. `Ledger` records high-level causal Events in one hash chain.
 2. `GitWorkspaceStore` gives each Agent a plain writable Git workspace.
@@ -15,11 +15,13 @@ The runtime has eight concepts:
 4. `HarnessAdapter` drives a native Agent Harness.
 5. `AgentRuntime` records one logical turn and any resulting workspace commit.
 6. `Swarm` snapshots Main as Revisions, creates isolated whole-Swarm Forks,
-   evaluates them, and promotes one selected Fork as the new Main after Human approval.
+   and atomically promotes an exact Fork frontier after Human approval.
 7. Plugins own external runtimes and expose shell CLIs to authorized Agents.
    Chat and Screen are the first concrete bundles.
 8. `SnapshotStore` exports and imports complete reusable Swarm blueprints under
    `snapshots/`.
+9. `DefaultView` projects the Ledger into a local Human control surface for
+   topology, evolution, Fork comparison, approval, and denial.
 
 There is deliberately no workflow engine, generic ChangeSet system, extension
 registry, database layer, CLI framework, or test framework.
@@ -34,7 +36,9 @@ src/
 │   ├── agent/
 │   └── swarm/
 ├── harness/
-└── snapshots/
+├── snapshots/
+└── view/
+    └── default/
 plugins/
 ├── chat/
 └── screen/
@@ -55,10 +59,10 @@ evolution protocol.
 Main Swarm
   -> Revision Proposal, including tests, inputs, and Agent workspace heads
   -> isolated whole-Swarm Forks from that Proposal or any past Revision
-  -> evaluate and select one Fork
-  -> freeze that Fork as an immutable Revision snapshot
-  -> Human Decision
-  -> promote it atomically as the only Main
+  -> normal Communication, Agent turn, and workspace Events inside each Fork
+  -> View derives test evidence and compares Forks
+  -> Human approves or denies one exact Fork frontier
+  -> approval snapshots and promotes that Fork atomically as the only Main
   -> continue Proposal-later Main workspace commits on top
 ```
 
@@ -89,7 +93,8 @@ from the new Definition and heads but never deletes its Git or Ledger history.
 
 An Agent may emit `swarm.revision.requested` with a complete Definition. After
 that turn's workspace commit is recorded, Main turns it into the immutable
-Proposal that enters the normal Fork, evaluation, and Human-gated lifecycle.
+Proposal that enters the normal Fork and Human-gated lifecycle. Evaluation is a
+View projection over recorded facts, not a Core Event.
 
 See [docs/DESIGN.md](docs/DESIGN.md).
 
@@ -112,3 +117,13 @@ claim of compatibility with another project.
 ```bash
 npm run check
 ```
+
+Once a `Swarm` is running, its built-in Human surface is one object:
+
+```ts
+const view = new DefaultView(swarm, "owner")
+const { url } = await view.listen({ port: 3000 })
+```
+
+Other Views may read the same Ledger and call the same Human-gated Swarm
+commands without inheriting the default renderer or server.

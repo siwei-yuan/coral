@@ -50,7 +50,7 @@ test("the bundled Continual Harness snapshot is a bootstrappable Actor-Refiner S
   assert.equal(Object.keys(imported.agentHeads).length, 2)
   assert.match(
     await workspaces.read("refiner", imported.agentHeads.refiner!, "AGENTS.md"),
-    /author a complete candidate `SwarmDefinition`/,
+    /author a complete proposed `SwarmDefinition`/,
   )
   assert.match(
     await workspaces.read("refiner", imported.agentHeads.refiner!, "context/initial.md"),

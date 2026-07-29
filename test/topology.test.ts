@@ -45,7 +45,7 @@ test("a Proposal may add an Agent only with an initialized workspace", async (t)
   assert.equal(proposal.workspaceCommits.auditor?.[0]?.commit, auditor.commit)
   assert.ok(proposal.workspaceCommits.auditor?.[0]?.eventId)
 
-  const fork = swarm.createFork(proposal.id)
+  const fork = swarm.createFork(proposal.id, "owner")
   const runStart = adapter.runs.length
   const result = await swarm.runFork(fork.id)
   const builderRun = adapter.runs.slice(runStart).find((run) => run.agentId === "builder")
@@ -57,16 +57,9 @@ test("a Proposal may add an Agent only with an initialized workspace", async (t)
   assert.match(swarmContext.content, /auditor: receives from builder/)
   assert.doesNotMatch(swarmContext.content, /core-behavior|chat-v1/)
   assert.match(contextText(auditorRun), /auditor \(you\): receives from builder/)
-  assert.equal(result.results?.every((testResult) => testResult.passed), true)
-
-  const candidate = swarm.freezeCandidate({
-    proposalId: proposal.id,
-    forkId: fork.id,
-    selectedBy: "agent/builder",
-  })
-  await swarm.approveAndActivate(candidate.id, "owner")
+  const promoted = await swarm.approve(fork.id, result.frontier, "owner")
   assert.equal(swarm.activeRevision().definition.agents.some((agent) => agent.id === "auditor"), true)
-  assert.equal(swarm.agentHead("auditor"), candidate.agentHeads.auditor)
+  assert.equal(swarm.agentHead("auditor"), promoted.agentHeads.auditor)
 })
 
 test("a Proposal may remove an Agent without deleting its auditable history", async (t) => {
@@ -100,27 +93,22 @@ test("a Proposal may remove an Agent without deleting its auditable history", as
   assert.equal(proposal.agentHeads.reviewer, undefined)
   assert.equal(proposal.workspaceCommits.reviewer?.length, 1)
 
-  const fork = swarm.createFork(proposal.id)
+  const fork = swarm.createFork(proposal.id, "owner")
   const runStart = adapter.runs.length
   const result = await swarm.runFork(fork.id)
   const builderRun = adapter.runs.slice(runStart).find((run) => run.agentId === "builder")
   assert.ok(builderRun)
   assert.doesNotMatch(contextText(builderRun), /reviewer/)
 
-  const candidate = swarm.freezeCandidate({
-    proposalId: proposal.id,
-    forkId: fork.id,
-    selectedBy: "agent/builder",
-  })
-  assert.equal(candidate.agentHeads.reviewer, undefined)
-  assert.equal(candidate.workspaceCommits.reviewer?.length, 1)
-  await swarm.approveAndActivate(candidate.id, "owner")
+  const promoted = await swarm.approve(fork.id, result.frontier, "owner")
+  assert.equal(promoted.agentHeads.reviewer, undefined)
+  assert.equal(promoted.workspaceCommits.reviewer?.length, 1)
 
-  const historical = swarm.createFork(revision.id)
+  const historical = swarm.createFork(revision.id, "owner")
   const historicalStart = adapter.runs.length
   await swarm.runFork(historical.id)
   const historicalBuilder = adapter.runs.slice(historicalStart).find((run) => run.agentId === "builder")
   assert.ok(historicalBuilder)
   assert.match(contextText(historicalBuilder), /builder \(you\): receives from nobody; sends to reviewer/)
-  assert.equal(result.results?.[0]?.passed, true)
+  assert.equal(result.status, "open")
 })

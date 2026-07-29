@@ -79,10 +79,10 @@ export class GitWorkspaceStore {
       this.verify(agentId, targetHead),
     ])
     if (!(await this.#isAncestor(agentId, baseCommit, currentHead))) {
-      throw new Error(`Main workspace head does not descend from Proposal head: ${agentId}`)
+      throw new Error(`Main workspace head does not descend from Fork source: ${agentId}`)
     }
     if (!(await this.#isAncestor(agentId, baseCommit, targetHead))) {
-      throw new Error(`Fork workspace head does not descend from Proposal head: ${agentId}`)
+      throw new Error(`Fork workspace head does not descend from its source: ${agentId}`)
     }
     if (currentHead === baseCommit || currentHead === targetHead) {
       return { revision: await this.verify(agentId, targetHead), commits: [] }

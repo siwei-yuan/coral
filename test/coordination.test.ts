@@ -53,7 +53,7 @@ test("an Agent may request a Swarm Revision Proposal from its turn", async (t) =
   )
   assert.ok(created)
   assert.equal(swarm.activeRevision().id, revision.id)
-  assert.equal((created.data as { definitionDigest: string }).definitionDigest.length > 0, true)
+  assert.deepEqual((created.data as { definition: typeof proposed }).definition, proposed)
 })
 
 test("an Agent may read a peer workspace snapshot and communicate a suggestion", async (t) => {

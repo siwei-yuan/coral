@@ -13,7 +13,7 @@ Only Main and Forks are running states. A Revision is a point-in-time snapshot.
 The native Harness is the execution center. A thin Adapter drives it. Each
 Agent owns a Git workspace through which it controls context, instructions,
 memory, skills, code, and tests. Swarm composes Agents, routing, pinned tests,
-Plugins, Proposals, Forks, evaluation, Human Decisions, and activation.
+Plugins, Proposals, Forks, Human Decisions, and activation.
 
 An Agent entry in `SwarmDefinition` declares only Swarm-level binding such as
 identity and Harness. The Agent's responsibility, instructions, and initial
@@ -53,6 +53,7 @@ core/swarm       -> Agent + Ledger + commit IDs
 harness
 plugins
 snapshots
+view/default     -> Ledger projection + Human commands
 ```
 
 Workspace never imports Swarm. Agent Runtime knows no Proposal, Revision, or
@@ -105,7 +106,8 @@ A Proposal pins one base Revision, the complete proposed Definition, every
 Agent head, the workspace commits accumulated since the base, Plugin bindings,
 causal Events, and the test suite with its input Events.
 
-A complete Swarm Fork may start from any stored Revision or any Proposal. It is
+A complete Swarm Fork may start from any stored Revision or any Proposal. A
+Human creates it through a View. It is
 the Swarm equivalent of a Git worktree: an isolated, mutable whole-Swarm state.
 A Revision Fork reproduces that historical snapshot. A Proposal Fork evaluates
 the proposed state and may be selected. Forks from the same source begin with
@@ -116,10 +118,12 @@ Events remain in one physical hash chain. Active and Fork scopes control
 visibility. A Fork sees active history through its source Revision or Proposal
 frontier plus its own scoped Events; it cannot see another Fork's Events.
 
-One selected Fork is frozen into an immutable Candidate Revision snapshot. A
-Human Decision targets that exact snapshot. Approval promotes the selected Fork
-as the only new Main and marks its Revision active. Other Forks remain only as
-auditable evaluation history.
+Fork execution records only its normal test inputs, Communications, Agent turns,
+and workspace commits. Test results are a View projection over those facts;
+there is no evaluation Event or Candidate state. A Human approves or denies an
+exact Fork frontier. Approval atomically snapshots that Fork as a new Revision
+and promotes it as the only Main. Denial records the Decision and preserves the
+Fork as audit history without creating a Revision.
 
 Main may continue to receive Agent workspace commits after the Proposal was
 created. At promotion, those Proposal-later commit tails are continued after
@@ -134,7 +138,22 @@ An Agent may author a modified complete `SwarmDefinition`, including Agent
 composition, Harness bindings, routes, tests, and Plugin bindings. This is
 proposal authority, never authority to mutate the active Definition in place.
 It emits `swarm.revision.requested`; after its turn and workspace commit finish,
-Main creates the Proposal with that request Event as its cause.
+Main creates the Proposal with that request Event as its cause. This creates no
+Revision. In the current design only Human approval creates and activates a new
+Revision.
+
+The complete Swarm lifecycle uses only these Events:
+
+- `swarm.revision.requested`: optional Agent intent.
+- `swarm.revision.proposed`: complete proposed Definition, Agent heads, tests,
+  workspace evidence, and causal Events.
+- `swarm.fork.created`: Human-created isolated state from a Revision or Proposal.
+- `swarm.decision.recorded`: Human approval or denial of an exact Fork frontier.
+- `swarm.revision.activated`: complete immutable Revision snapshot after a
+  successful approval.
+
+There is deliberately no `swarm.fork.evaluated`, `swarm.fork.selected`, or
+pre-approval `swarm.revision.frozen` Event.
 
 An Agent changes its own responsibility, context, memory, skills, or context
 composition by editing its workspace. The resulting commit affects its next
@@ -185,6 +204,25 @@ workspace.
 Only the active Swarm may use live external egress. Forks replace live bindings
 with mock mode.
 
+## Views
+
+A View is a first-class Human control surface, not a Plugin and not part of a
+`SwarmDefinition`. It reads the Ledger, projects topology and evolution, and may
+issue only explicit Human commands: create a Fork, approve a Fork frontier, or
+deny a Fork frontier. Core validates the command and records its result.
+
+The default implementation lives in `src/view/default`. It has no database or
+private lifecycle model. Replaying the Ledger reconstructs active topology,
+Revision and Proposal history, Fork heads and evidence, derived test results,
+collaboration, and Human Decisions. Its local HTTP surface renders an Agent
+canvas, evolution path, Fork comparison, and Ledger timeline.
+
+The Ledger is the control-plane source of truth, not a container for all raw
+bytes. A View follows Ledger references to Git for workspace files, Harness
+storage for trajectory excerpts, and Plugin stores for artifacts such as raw
+screenshots. Alternative open-source Views can use the same Ledger projection
+or build their own without changing Core.
+
 ### Deferred: Plugin-owned evolution
 
 Plugin versioning is intentionally outside the current implementation. A future
@@ -195,7 +233,7 @@ workspace.
 
 A future `SwarmDefinition` and Revision may pin the exact Plugin commit alongside
 Agent workspace commits. Changing that pin would then be a Swarm-level change
-that follows the normal Proposal, Fork evaluation, and Human activation path.
+that follows the normal Proposal, Fork execution, and Human activation path.
 Mutable operational state such as screenshots, OCR output, App sessions,
 credentials, cursors, and caches remains Plugin-owned runtime data outside that
 Git commit. This is a recorded direction, not a current Core contract.
