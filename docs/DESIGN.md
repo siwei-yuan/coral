@@ -202,10 +202,22 @@ path directly through a Plugin CLI and the Plugin-owned runtime. It does not
 become an outbound Ledger Event. No Plugin copies files into or initializes an
 Agent workspace.
 
-`pluginIngress` says which Agent receives a Plugin's inbound Events. It is not a
-bidirectional channel. `plugins[].exposedTo` separately says which Agents can
-see that Plugin's CLI. Forks replace live bindings with mock mode; actual
-runtime isolation remains part of the deferred Agent-plus-workspace sandbox.
+Each `pluginIngress` entry is one allowed Plugin-to-Agent edge. A Plugin may
+have multiple entries. An inbound Event with no recipients is routed to all of
+that Plugin's ingress targets; explicit recipients must be a subset of those
+targets. This is not a bidirectional channel. `plugins[].exposedTo` separately
+says which Agents can see that Plugin's CLI. The Harness command environment
+includes the current Agent ID and binding mode. Forks replace live bindings
+with mock mode; actual runtime isolation remains part of the deferred
+Agent-plus-workspace sandbox.
+
+Scheduler is a normal Plugin, not a Core service. Its CLI lets an Agent set,
+remove, and list its own named recurring durations and notes. Its runtime owns
+the schedule records and returns due inbound Communications when polled by the
+host. Each firing contains the name, exact duration, scheduled time, and note,
+and explicitly targets the schedule owner. Schedule configuration is a CLI
+operation rather than a Ledger Event. The current version deliberately has no
+cron grammar, calendar recurrence, workflow engine, or Scheduler-specific View.
 
 ## Views
 

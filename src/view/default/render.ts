@@ -100,7 +100,7 @@ function snapshot(model: DefaultViewModel): string {
 
 function renderPlugin(plugin: PluginView): string {
   const eventRows = plugin.events.slice(-4).reverse().map((event) => `<li><span><strong>${escapeHtml(event.type)}</strong><small>#${event.seq} · ${escapeHtml(event.actor)}</small></span><span class="recipient">${event.recipients.map(shortRecipient).join(" · ") || "unrouted"}</span></li>`).join("")
-  return `<article class="plugin"><header><div><p class="eyebrow">Plugin · ${escapeHtml(plugin.mode)}</p><h3>${escapeHtml(plugin.id)}</h3></div><code>${escapeHtml(plugin.command)}</code></header><div class="capability"><span>Inbound</span><strong>${plugin.ingressTo ? `→ ${escapeHtml(plugin.ingressTo)}` : "Not bound"}</strong></div><div class="capability"><span>CLI exposed to</span><strong>${plugin.exposedTo.map(escapeHtml).join(", ") || "Nobody"}</strong></div><ul class="plugin-events">${eventRows || `<li class="muted">No inbound Events recorded</li>`}</ul></article>`
+  return `<article class="plugin"><header><div><p class="eyebrow">Plugin · ${escapeHtml(plugin.mode)}</p><h3>${escapeHtml(plugin.id)}</h3></div><code>${escapeHtml(plugin.command)}</code></header><div class="capability"><span>Inbound to</span><strong>${plugin.ingressTargets.map(escapeHtml).join(", ") || "Nobody"}</strong></div><div class="capability"><span>CLI exposed to</span><strong>${plugin.exposedTo.map(escapeHtml).join(", ") || "Nobody"}</strong></div><ul class="plugin-events">${eventRows || `<li class="muted">No inbound Events recorded</li>`}</ul></article>`
 }
 
 function evolution(model: DefaultViewModel): string {

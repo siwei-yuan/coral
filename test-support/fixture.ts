@@ -38,6 +38,7 @@ export async function createFixture(t: TestContext) {
     pluginExecutables: [
       { id: "chat", executable: "/plugins/chat/bin/chat" },
       { id: "screen", executable: "/plugins/screen/bin/screen" },
+      { id: "scheduler", executable: "/plugins/scheduler/bin/scheduler" },
     ],
   })
   const definition: SwarmDefinition = {

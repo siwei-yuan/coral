@@ -1,0 +1,82 @@
+{
+  "formatVersion": 1,
+  "name": "personal-agent",
+  "description": "A four-Agent personal Swarm that learns the user, builds memory, anticipates next steps, and audits itself.",
+  "definition": {
+    "agents": [
+      { "id": "chat-agent", "harness": "codex" },
+      { "id": "memory-builder", "harness": "codex" },
+      { "id": "proactivity", "harness": "codex" },
+      { "id": "auditor", "harness": "codex" }
+    ],
+    "routes": [
+      { "from": "chat-agent", "to": "memory-builder" },
+      { "from": "chat-agent", "to": "proactivity" },
+      { "from": "chat-agent", "to": "auditor" },
+      { "from": "memory-builder", "to": "chat-agent" },
+      { "from": "memory-builder", "to": "proactivity" },
+      { "from": "proactivity", "to": "chat-agent" },
+      { "from": "auditor", "to": "chat-agent" },
+      { "from": "auditor", "to": "memory-builder" },
+      { "from": "auditor", "to": "proactivity" }
+    ],
+    "pluginIngress": [
+      { "plugin": "chat", "ingressTo": "chat-agent" },
+      { "plugin": "screen", "ingressTo": "memory-builder" },
+      { "plugin": "screen", "ingressTo": "proactivity" },
+      { "plugin": "scheduler", "ingressTo": "chat-agent" },
+      { "plugin": "scheduler", "ingressTo": "memory-builder" },
+      { "plugin": "scheduler", "ingressTo": "proactivity" },
+      { "plugin": "scheduler", "ingressTo": "auditor" }
+    ],
+    "plugins": [
+      { "id": "chat", "command": "chat", "exposedTo": ["chat-agent"], "mode": "live" },
+      { "id": "screen", "command": "screen", "exposedTo": ["memory-builder", "proactivity"], "mode": "live" },
+      { "id": "scheduler", "command": "scheduler", "exposedTo": ["chat-agent", "memory-builder", "proactivity", "auditor"], "mode": "live" }
+    ],
+    "tests": [
+      {
+        "id": "user-feedback-is-handled",
+        "inputEvents": [
+          {
+            "type": "communication.sent",
+            "data": {
+              "from": "test/user-feedback-is-handled",
+              "to": ["agent/chat-agent"],
+              "content": [
+                { "type": "text", "text": "The user prefers concise, action-oriented answers. Respond and share this feedback where useful." }
+              ]
+            }
+          }
+        ],
+        "expect": { "eventType": "communication.sent" }
+      },
+      {
+        "id": "auditor-gives-advice",
+        "inputEvents": [
+          {
+            "type": "communication.sent",
+            "data": {
+              "from": "test/auditor-gives-advice",
+              "to": ["agent/auditor"],
+              "content": [
+                { "type": "text", "text": "Review the visible Agent evidence and send one concrete improvement suggestion." }
+              ]
+            }
+          }
+        ],
+        "expect": { "eventType": "communication.sent" }
+      }
+    ]
+  },
+  "workspaces": {
+    "chat-agent": "agents/chat-agent",
+    "memory-builder": "agents/memory-builder",
+    "proactivity": "agents/proactivity",
+    "auditor": "agents/auditor"
+  },
+  "source": {
+    "revisionId": null,
+    "agentHeads": {}
+  }
+}

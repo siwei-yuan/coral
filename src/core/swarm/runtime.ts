@@ -139,11 +139,14 @@ export class Swarm {
   ingest(draft: EventDraft): LedgerEvent {
     let data = structuredClone(draft.data ?? null)
     if (draft.type === "communication.sent" && isPluginCommunication(data)) {
-      const channel = this.activeRevision().definition.pluginIngress.find(
+      const targets = this.activeRevision().definition.pluginIngress.filter(
         (binding) => binding.plugin === data.source.plugin,
-      )
-      if (!channel) throw new Error(`No ingress for Plugin: ${data.source.plugin}`)
-      if (!Array.isArray(data.to) || data.to.length === 0) data.to = [`agent/${channel.ingressTo}`]
+      ).map((binding) => `agent/${binding.ingressTo}`)
+      if (targets.length === 0) throw new Error(`No ingress for Plugin: ${data.source.plugin}`)
+      if (!Array.isArray(data.to) || data.to.length === 0) data.to = targets
+      else if (data.to.some((recipient) => typeof recipient !== "string" || !targets.includes(recipient))) {
+        throw new Error(`Plugin ingress recipient is not allowed: ${data.source.plugin}`)
+      }
     }
     return this.ledger.append({
       ...draft,
@@ -649,6 +652,11 @@ export class Swarm {
         if (!executable) throw new Error(`Plugin executable is not registered: ${binding.id}`)
         return immutable({
           ...executable,
+          env: {
+            ...executable.env,
+            CORALLUM_AGENT_ID: agentId,
+            CORALLUM_PLUGIN_MODE: binding.mode,
+          },
           command: binding.command,
           mode: binding.mode,
         })

@@ -61,3 +61,35 @@ test("the bundled Continual Harness snapshot is a bootstrappable Actor-Refiner S
     /export default async function compose/,
   )
 })
+
+test("the bundled Personal Agent snapshot owns four evolvable Agent workspaces", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "corallum-personal-snapshot-"))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const snapshots = new SnapshotStore(join(process.cwd(), "snapshots"))
+  const workspaces = new GitWorkspaceStore(join(root, "workspaces"))
+  const agentRuntime = new AgentRuntime({ ledger: new Ledger(), workspaces, adapters: [] })
+  const imported = await snapshots.instantiate("personal-agent", agentRuntime)
+
+  assert.deepEqual(imported.definition.agents.map((agent) => agent.id), [
+    "chat-agent",
+    "memory-builder",
+    "proactivity",
+    "auditor",
+  ])
+  assert.deepEqual(
+    imported.definition.pluginIngress.filter((edge) => edge.plugin === "scheduler").map((edge) => edge.ingressTo),
+    ["chat-agent", "memory-builder", "proactivity", "auditor"],
+  )
+  assert.deepEqual(
+    imported.definition.plugins.find((plugin) => plugin.id === "chat")?.exposedTo,
+    ["chat-agent"],
+  )
+  assert.match(
+    await workspaces.read("memory-builder", imported.agentHeads["memory-builder"]!, "AGENTS.md"),
+    /improve how memory is selected, organized, connected, compressed/,
+  )
+  assert.match(
+    await workspaces.read("auditor", imported.agentHeads.auditor!, "context.ts"),
+    /export default async function compose/,
+  )
+})

@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
-import { ChatRuntime, ScreenRuntime } from "../src/index.ts"
+import { ChatRuntime, SchedulerRuntime, ScreenRuntime } from "../src/index.ts"
 import { createFixture } from "../test-support/fixture.ts"
 
 const execute = promisify(execFile)
@@ -88,4 +88,57 @@ test("Screen Runtime publishes an activity Event and its CLI reads App, OCR, and
   assert.equal(activity.captures[0]?.ocr, "Implement the Screen Plugin")
   assert.equal(await readFile(activity.captures[0]!.image, "utf8"), "raw-image")
   assert.equal((await screen.current())?.app.name, "Codex")
+})
+
+test("Scheduler CLI owns recurring notes and its inbound Events follow declared Plugin ingress", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "corallum-scheduler-"))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const scheduler = new SchedulerRuntime(root)
+  const executable = scheduler.executable()
+  const env = {
+    ...process.env,
+    ...executable.env,
+    CORALLUM_AGENT_ID: "reviewer",
+    CORALLUM_PLUGIN_MODE: "live",
+  }
+  const { stdout } = await execute(
+    executable.executable,
+    ["set", "--name", "periodic-audit", "--every", "6h", "--note", "Review the other Agents."],
+    { env },
+  )
+  const schedule = JSON.parse(stdout) as { nextAt: string }
+  const [draft] = await scheduler.due(new Date(schedule.nextAt))
+  assert.deepEqual((draft?.data as { to: string[] }).to, ["agent/reviewer"])
+  assert.deepEqual((draft?.data as { content: unknown[] }).content, [{
+    type: "schedule.fired",
+    name: "periodic-audit",
+    schedule: { every: "6h" },
+    note: "Review the other Agents.",
+    scheduledAt: schedule.nextAt,
+  }])
+
+  const { swarm, definition } = await createFixture(t)
+  const proposed = structuredClone(definition)
+  proposed.plugins.push({ id: "scheduler", command: "scheduler", exposedTo: ["builder", "reviewer"], mode: "live" })
+  proposed.pluginIngress.push(
+    { plugin: "scheduler", ingressTo: "builder" },
+    { plugin: "scheduler", ingressTo: "reviewer" },
+  )
+  const reason = swarm.appendInput({ type: "swarm.evolution.requested", actor: "external/user" })
+  const proposal = await swarm.propose({ authoredBy: "builder", definition: proposed, reasonEventIds: [reason.id] })
+  const fork = swarm.createFork(proposal.id, "owner")
+  const result = await swarm.runFork(fork.id)
+  await swarm.approve(fork.id, result.frontier, "owner")
+
+  const event = swarm.ingest(draft!)
+  assert.deepEqual((event.data as { to: string[] }).to, ["agent/reviewer"])
+  const broadcast = structuredClone(draft!)
+  ;(broadcast.data as { to: string[] }).to = []
+  assert.deepEqual((swarm.ingest(broadcast).data as { to: string[] }).to, ["agent/builder", "agent/reviewer"])
+  const invalid = structuredClone(draft!)
+  ;(invalid.data as { to: string[] }).to = ["agent/chat-agent"]
+  assert.throws(() => swarm.ingest(invalid), /Plugin ingress recipient is not allowed/)
+
+  await execute(executable.executable, ["remove", "--name", "periodic-audit"], { env })
+  assert.deepEqual(JSON.parse((await execute(executable.executable, ["list"], { env })).stdout), [])
 })

@@ -61,7 +61,7 @@ export interface PluginView {
   command: string
   mode: string
   exposedTo: string[]
-  ingressTo: string | null
+  ingressTargets: string[]
   events: PluginEventView[]
 }
 
@@ -151,7 +151,9 @@ export function projectLedger(events: LedgerEvent[]): DefaultViewModel {
     command: binding.command,
     mode: binding.mode,
     exposedTo: binding.exposedTo,
-    ingressTo: activeRevision.definition.pluginIngress.find((item) => item.plugin === binding.id)?.ingressTo ?? null,
+    ingressTargets: activeRevision.definition.pluginIngress
+      .filter((item) => item.plugin === binding.id)
+      .map((item) => item.ingressTo),
     events: ordered.flatMap((event): PluginEventView[] => {
       if (!isPluginEvent(event, binding.id)) return []
       const data = event.data as { to?: unknown }

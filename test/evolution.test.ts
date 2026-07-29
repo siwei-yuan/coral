@@ -94,7 +94,7 @@ test("a Revision snapshots Agent commits and Forks can start from any Revision o
     command: "chat",
     mode: "live",
     exposedTo: ["builder"],
-    ingressTo: "builder",
+    ingressTargets: ["builder"],
     events: [],
   })
   assert.equal(projected.forks.find((fork) => fork.id === first.id)?.tests[0]?.passed, true)

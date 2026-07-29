@@ -78,13 +78,14 @@ export function validateDefinition(definition: unknown): SwarmDefinition {
     }
     pluginIds.add(plugin.id)
   }
-  const ingressPlugins = new Set<string>()
+  const ingressEdges = new Set<string>()
   for (const ingress of copy.pluginIngress) {
     if (!pluginIds.has(ingress.plugin) || !ids.has(ingress.ingressTo)) {
       throw new Error("Plugin ingress requires a Plugin and existing Agent")
     }
-    if (ingressPlugins.has(ingress.plugin)) throw new Error(`duplicate Plugin ingress: ${ingress.plugin}`)
-    ingressPlugins.add(ingress.plugin)
+    const edge = `${ingress.plugin}\0${ingress.ingressTo}`
+    if (ingressEdges.has(edge)) throw new Error(`duplicate Plugin ingress: ${ingress.plugin} -> ${ingress.ingressTo}`)
+    ingressEdges.add(edge)
   }
   for (const test of copy.tests) {
     if (!test.id || !Array.isArray(test.inputEvents) || test.inputEvents.length === 0) {
@@ -120,7 +121,8 @@ export function projectAgentSwarmView(
       sendsTo: definition.routes.filter((route) => route.from === agent.id).map((route) => route.to),
       receivesFromPlugins: definition.pluginIngress
         .filter((ingress) => ingress.ingressTo === agent.id)
-        .map((ingress) => ingress.plugin),
+        .map((ingress) => ingress.plugin)
+        .filter((plugin, index, plugins) => plugins.indexOf(plugin) === index),
     })),
     routes: definition.routes,
     plugins: pluginBindings

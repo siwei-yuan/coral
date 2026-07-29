@@ -26,6 +26,8 @@ test("Main routes Agent Communication through the active Swarm Definition", asyn
     ["builder", "reviewer"],
   )
   assert.deepEqual(adapter.runs.at(-2)?.pluginCommands.map((plugin) => plugin.command), ["chat"])
+  assert.equal(adapter.runs.at(-2)?.pluginCommands[0]?.env?.CORALLUM_AGENT_ID, "builder")
+  assert.equal(adapter.runs.at(-2)?.pluginCommands[0]?.env?.CORALLUM_PLUGIN_MODE, "live")
   assert.deepEqual(adapter.runs.at(-1)?.pluginCommands, [])
 })
 

@@ -17,7 +17,7 @@ The runtime has nine concepts:
 6. `Swarm` snapshots Main as Revisions, creates isolated whole-Swarm Forks,
    and atomically promotes an exact Fork frontier after Human approval.
 7. Plugins own external runtimes and expose shell CLIs to authorized Agents.
-   Chat and Screen are the first concrete bundles.
+   Chat, Screen, and Scheduler are the first concrete bundles.
 8. `SnapshotStore` exports and imports complete reusable Swarm blueprints under
    `snapshots/`.
 9. `DefaultView` projects the Ledger into a local Human control surface for
@@ -41,7 +41,8 @@ src/
     └── default/
 plugins/
 ├── chat/
-└── screen/
+├── screen/
+└── scheduler/
 ```
 
 Workspace knows only Git. Agent combines Workspace and a Harness. Swarm
@@ -80,7 +81,9 @@ The Harness receives only those command descriptors; no Plugin file is copied
 into an Agent workspace. Plugin CLI calls remain Harness operations. Chat user
 input and new Screen activities enter the Swarm as `communication.sent`.
 Agent output goes directly through a Plugin CLI and its runtime; it is not an
-outbound Ledger Event.
+outbound Ledger Event. Scheduler configuration also goes through its CLI;
+schedule firings enter as inbound Communications carrying the exact recurring
+duration and Agent-authored note.
 
 A Revision is a point-in-time snapshot, not a second running Swarm and not a
 barrier around later workspace work. Main and Forks run; Revisions only record
@@ -112,6 +115,11 @@ through the human-gated revision lifecycle.
 `snapshots/continual-harness/` is a small Actor–Refiner example inspired by the
 Continual Harness pattern. It is a Corallum blueprint, not a vendored copy or a
 claim of compatibility with another project.
+
+`snapshots/personal-agent/` defines Chat Agent, Memory Builder, Proactivity, and
+Auditor as four independently evolving workspaces. Chat, Screen, and Scheduler
+bindings live in its Swarm Definition; live messages, captures, and schedules
+remain Plugin-owned runtime state outside the Snapshot.
 
 ## Run
 
