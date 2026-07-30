@@ -181,12 +181,14 @@ const { url } = await view.listen({ port: 3000 })
 Other Views may read the same Ledger and call the same Human-gated Swarm
 commands without inheriting the default renderer or server.
 
-The default View projects a pannable, zoomable Git-style evolution tree from
-Ledger Events. Revision, Proposal, Fork, Decision, and activation state remain
-clickable nodes; Agent cards show the current workspace head and resumable
-Harness checkpoint, while turn rows expose causal input and committed effects.
-It also renders every Plugin generically from its Definition and inbound
-Communications. A Plugin may optionally provide a View-only extension.
+The default View projects a pannable, semantically zoomable evolution canvas
+from Ledger Events. Its high-level map shows formal Revisions, parallel Main
+continuations, Proposal evaluations, Decisions, and activation paths. Zooming
+into a running state shows only the Agent and Plugin commit timeline until its
+next control node. A second sector projects Agent routes and Plugin access
+directly from the active Definition beside a time-filtered Event Ledger; replay
+animates routing along those existing topology edges. A Plugin may optionally
+provide a View-only extension.
 The pinned Chat Plugin adds a conversation surface and the pinned Screen Plugin
 renders raw image, OCR, and foreground App session. Extensions add UI only and
 receive no Revision decision authority.
