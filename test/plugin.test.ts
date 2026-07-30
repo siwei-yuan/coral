@@ -45,30 +45,78 @@ test("Chat runtime emits user Communication and its Agent CLI writes replies out
   await runtime.stop()
 })
 
-test("Screen runtime emits activity Communication and its CLI reads App, OCR, and raw image", async (t) => {
+test("Screen pipeline coalesces capture signals, persists an Activity, then emits its reference", async (t) => {
   const root = await temporary(t, "screen")
   const emitted: PluginIngressDraft[] = []
-  const runtime = await startPlugin("screen", root, emitted, "live", { CORALLUM_SCREEN_TICK_MS: "5" })
-  const inbox = join(root, "inbox")
-  await mkdir(inbox, { recursive: true })
-  await writeFile(join(inbox, "activity-1.json"), JSON.stringify({
-    id: "activity-1",
-    app: { name: "Codex", bundleId: "com.openai.codex" },
-    startedAt: "2026-07-29T10:00:00Z",
-    endedAt: "2026-07-29T10:05:00Z",
-    captures: [{
-      id: "capture-1",
-      capturedAt: "2026-07-29T10:01:00Z",
-      image: Buffer.from("raw-image").toString("base64"),
-      ocr: "Implement the Screen Plugin",
-    }],
-  }))
+  const { ScreenPipeline } = await import(pathToFileURL(join(process.cwd(), "plugins/screen/pipeline.mjs")).href) as {
+    ScreenPipeline: new (input: {
+      stateRoot: string
+      emit(draft: PluginIngressDraft): Promise<void>
+      capture(force: boolean): Promise<Record<string, unknown>>
+      config: Record<string, number>
+    }) => {
+      signal(kind: string): void
+      visual(): void
+      stop(): Promise<void>
+    }
+  }
+  await Promise.all([
+    mkdir(join(root, "activities"), { recursive: true }),
+    mkdir(join(root, "incoming"), { recursive: true }),
+    mkdir(join(root, "cache"), { recursive: true }),
+  ])
+  let captures = 0
+  const pipeline = new ScreenPipeline({
+    stateRoot: root,
+    config: {
+      contextDelayMs: 5,
+      softDelayMs: 10,
+      softMaxWaitMs: 20,
+      minCaptureIntervalMs: 1,
+      activeVisualMs: 10,
+      idleVisualMs: 20,
+      activeForMs: 100,
+      suspendAfterMs: 200,
+      activityQuietMs: 15,
+      maxActivityMs: 1_000,
+    },
+    capture: async () => {
+      captures += 1
+      if (captures > 1) return { type: "skip" }
+      const image = join(root, "incoming", "capture.jpg")
+      const preview = join(root, "incoming", "capture.preview")
+      await Promise.all([writeFile(image, "raw-image"), writeFile(preview, "preview")])
+      return {
+        type: "capture",
+        contextKey: "com.openai.codex:1",
+        app: { name: "Codex", bundleId: "com.openai.codex" },
+        capturedAt: "2026-07-29T10:01:00Z",
+        image,
+        preview,
+        ocr: "Implement the Screen Plugin",
+        ocrSignature: "ocr-1",
+      }
+    },
+    emit: async (draft) => {
+      const activityId = ((draft.data as { content: Array<{ activityId: string }> }).content[0]!).activityId
+      await readFile(join(root, "activities", activityId, "activity.json"))
+      emitted.push(draft)
+    },
+  })
+  pipeline.signal("input")
+  pipeline.signal("input")
+  pipeline.signal("input")
   await waitFor(() => emitted.length === 1)
 
+  assert.equal(captures, 1)
   assert.deepEqual((emitted[0]?.data as { content: unknown[] }).content, [
-    { type: "screen.activity", activityId: "activity-1" },
+    {
+      type: "screen.activity",
+      activityId: (emitted[0]?.data as { content: Array<{ activityId: string }> }).content[0]!.activityId,
+    },
   ])
-  const { stdout } = await execute(join(process.cwd(), "plugins/screen/bin/screen.mjs"), ["activity", "activity-1"], {
+  const activityId = (emitted[0]?.data as { content: Array<{ activityId: string }> }).content[0]!.activityId
+  const { stdout } = await execute(join(process.cwd(), "plugins/screen/bin/screen.mjs"), ["activity", activityId], {
     env: { ...process.env, CORALLUM_PLUGIN_STATE: root },
   })
   const activity = JSON.parse(stdout) as {
@@ -78,7 +126,10 @@ test("Screen runtime emits activity Communication and its CLI reads App, OCR, an
   assert.equal(activity.app.name, "Codex")
   assert.equal(activity.captures[0]?.ocr, "Implement the Screen Plugin")
   assert.equal(await readFile(activity.captures[0]!.image, "utf8"), "raw-image")
-  await runtime.stop()
+  pipeline.visual()
+  await waitFor(() => captures === 2)
+  assert.equal(emitted.length, 1)
+  await pipeline.stop()
 })
 
 test("Scheduler CLI owns recurring notes and its runtime emits due Communication", async (t) => {

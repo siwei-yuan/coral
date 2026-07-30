@@ -31,7 +31,7 @@
     ],
     "plugins": [
       { "id": "chat", "command": "chat", "commit": "bbb26bbcd5b64a0faad6212a11b6f518116c0e90", "exposedTo": ["chat-agent"], "mode": "live" },
-      { "id": "screen", "command": "screen", "commit": "127f8740cfbe429f4aa2be801e000cf3e83f0b96", "exposedTo": ["memory-builder", "proactivity"], "mode": "live" },
+      { "id": "screen", "command": "screen", "commit": "6a3a90a9b49b3ec6cf7264ed92c876f29034d3c7", "exposedTo": ["memory-builder", "proactivity"], "mode": "live" },
       { "id": "scheduler", "command": "scheduler", "commit": "a3dbb51d4962141b0dc41a367fc9df74ebc56065", "exposedTo": ["chat-agent", "memory-builder", "proactivity", "auditor"], "mode": "live" }
     ],
     "tests": [

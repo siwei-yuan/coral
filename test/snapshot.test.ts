@@ -124,6 +124,7 @@ test("a Snapshot deploys as one running Swarm with pinned Plugin runtimes", asyn
     instanceRoot: root,
     human: "owner",
     adapters: [],
+    pluginEnvironments: { screen: { CORALLUM_SCREEN_DISABLED: "1" } },
   })
   t.after(async () => {
     await deployment.stop()

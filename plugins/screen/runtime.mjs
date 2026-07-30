@@ -1,110 +1,104 @@
-import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises"
+import { execFile, spawn } from "node:child_process"
+import { createHash } from "node:crypto"
+import { constants } from "node:fs"
+import { access, mkdir, readFile } from "node:fs/promises"
 import { join } from "node:path"
-import { randomUUID } from "node:crypto"
+import { fileURLToPath } from "node:url"
+import { promisify } from "node:util"
+import { cleanup, readCurrent, screenConfig, ScreenPipeline } from "./pipeline.mjs"
 import { createView } from "./view.mjs"
+
+const execute = promisify(execFile)
 
 export async function start({ id, mode, stateRoot, env, emit }) {
   if (id !== "screen") throw new Error(`Invalid Screen Plugin ID: ${id}`)
-  const inbox = join(stateRoot, "inbox")
-  await mkdir(inbox, { recursive: true })
+  await Promise.all([
+    mkdir(join(stateRoot, "activities"), { recursive: true }),
+    mkdir(join(stateRoot, "incoming"), { recursive: true }),
+    mkdir(join(stateRoot, "cache"), { recursive: true }),
+  ])
 
-  async function activity(activityId) {
-    assertId(activityId)
-    const root = join(stateRoot, "activities", activityId)
-    const value = JSON.parse(await readFile(join(root, "activity.json"), "utf8"))
-    return { ...value, captures: value.captures.map((capture) => ({ ...capture, image: join(root, capture.image) })) }
+  const current = () => readCurrent(stateRoot)
+  if (mode !== "live" || env.CORALLUM_SCREEN_DISABLED === "1") {
+    return { view: createView({ current }), async stop() {} }
   }
 
-  async function current() {
-    try {
-      const value = JSON.parse(await readFile(join(stateRoot, "current.json"), "utf8"))
-      return value.activityId ? activity(value.activityId) : null
-    } catch (error) {
-      if (isMissing(error)) return null
-      throw error
-    }
-  }
+  await cleanup(stateRoot)
+  const helper = await compileHelper(stateRoot)
+  const pipeline = new ScreenPipeline({
+    stateRoot,
+    emit,
+    capture: (force) => capture(helper, stateRoot, force),
+    config: screenConfig,
+  })
+  const observer = observe(helper, (signal) => pipeline.signal(signal))
+  pipeline.signal("context")
 
-  async function publish(input) {
-    if (!input.app?.name || !input.startedAt || !input.endedAt || !Array.isArray(input.captures) || input.captures.length === 0) {
-      throw new Error("Screen activity requires App session and captures")
-    }
-    const activityId = input.id ?? `activity_${randomUUID()}`
-    assertId(activityId)
-    const observations = join(stateRoot, "activities")
-    const temporary = join(stateRoot, `.tmp-${activityId}`)
-    const destination = join(observations, activityId)
-    await mkdir(join(temporary, "captures"), { recursive: true })
-    const captures = []
-    for (const capture of input.captures) {
-      if (!capture.capturedAt) throw new Error("Screen capture requires time")
-      const captureId = capture.id ?? `capture_${randomUUID()}`
-      assertId(captureId)
-      const image = `captures/${captureId}.png`
-      await writeFile(join(temporary, image), Buffer.from(capture.image, "base64"))
-      captures.push({ id: captureId, capturedAt: capture.capturedAt, image, ocr: capture.ocr ?? "" })
-    }
-    const value = {
-      id: activityId,
-      app: { ...input.app },
-      startedAt: input.startedAt,
-      endedAt: input.endedAt,
-      captures,
-    }
-    await writeFile(join(temporary, "activity.json"), `${JSON.stringify(value, null, 2)}\n`)
-    await mkdir(observations, { recursive: true })
-    await rename(temporary, destination)
-    await writeFile(join(stateRoot, "current.json"), `${JSON.stringify({ activityId })}\n`)
-    await emit({
-      type: "communication.sent",
-      actor: `plugin/${id}`,
-      data: {
-        from: `plugin/${id}`,
-        to: [],
-        source: { plugin: id, externalRef: activityId },
-        content: [{ type: "screen.activity", activityId }],
-      },
-    })
-    return value
+  let visualTimer
+  const scheduleVisual = () => {
+    visualTimer = setTimeout(() => {
+      pipeline.visual()
+      scheduleVisual()
+    }, pipeline.visualDelay())
+    visualTimer.unref()
   }
-
-  async function drain() {
-    const files = (await readdir(inbox)).filter((file) => file.endsWith(".json")).sort()
-    for (const file of files) {
-      const path = join(inbox, file)
-      await publish(JSON.parse(await readFile(path, "utf8")))
-      await rm(path)
-    }
-  }
-
-  const tickMs = interval(env.CORALLUM_SCREEN_TICK_MS)
-  let pending = Promise.resolve()
-  const tick = () => {
-    pending = pending.then(drain).catch((error) => console.error("Screen runtime:", error))
-  }
-  const timer = mode === "live" ? setInterval(tick, tickMs) : null
-  timer?.unref()
-  if (timer) tick()
+  scheduleVisual()
+  const cleanupTimer = setInterval(
+    () => cleanup(stateRoot).catch((error) => console.error("Screen cleanup:", error)),
+    3_600_000,
+  )
+  cleanupTimer.unref()
 
   return {
     view: createView({ current }),
     async stop() {
-      if (timer) clearInterval(timer)
-      await pending
+      clearTimeout(visualTimer)
+      clearInterval(cleanupTimer)
+      observer.kill()
+      await pipeline.stop()
     },
   }
 }
 
-function interval(value) {
-  const milliseconds = Number(value ?? 1_000)
-  if (!Number.isFinite(milliseconds) || milliseconds < 1) throw new Error("Invalid Screen tick interval")
-  return milliseconds
+async function compileHelper(stateRoot) {
+  const source = fileURLToPath(new URL("native/screen.swift", import.meta.url))
+  const hash = createHash("sha256").update(await readFile(source)).digest("hex").slice(0, 16)
+  const root = join(stateRoot, "native", hash)
+  const executable = join(root, "screen")
+  try {
+    await access(executable, constants.X_OK)
+    return executable
+  } catch {}
+  await mkdir(root, { recursive: true })
+  await execute("/usr/bin/swiftc", ["-O", source, "-o", executable], { timeout: 120_000 })
+  return executable
 }
 
-function assertId(id) {
-  if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error(`Invalid Screen activity identifier: ${id}`)
+function observe(helper, onSignal) {
+  const child = spawn(helper, ["observe"], { stdio: ["ignore", "pipe", "pipe"] })
+  let buffer = ""
+  child.stdout.setEncoding("utf8")
+  child.stdout.on("data", (chunk) => {
+    buffer += chunk
+    const lines = buffer.split("\n")
+    buffer = lines.pop()
+    for (const line of lines) {
+      try {
+        onSignal(JSON.parse(line).kind)
+      } catch (error) {
+        console.error("Screen observer:", error)
+      }
+    }
+  })
+  child.stderr.setEncoding("utf8")
+  child.stderr.on("data", (value) => console.error(`Screen observer: ${value.trim()}`))
+  return child
 }
 
-function isMissing(error) {
-  return error && typeof error === "object" && error.code === "ENOENT"
+async function capture(helper, stateRoot, force) {
+  const { stdout } = await execute(helper, ["capture", stateRoot, force ? "force" : "changed"], {
+    timeout: 30_000,
+    maxBuffer: 4 * 1024 * 1024,
+  })
+  return JSON.parse(stdout)
 }

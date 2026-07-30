@@ -13,6 +13,12 @@ raw image, OCR, and foreground App session with the `screen` CLI. All four
 Agents can create, remove, and list their own recurring schedules with the
 `scheduler` CLI.
 
+The Screen Plugin captures the foreground macOS window after meaningful,
+debounced activity, removes visually unchanged frames, and performs local
+Apple Vision OCR before JPEG storage. Each Ledger Event contains only an
+activity ID; the receiving Agent explicitly loads its artifacts with
+`screen activity <id>`.
+
 Schedule records, Chat queues, and Screen captures are live Plugin state and
 are not part of this Snapshot. Each Agent creates schedules after it first
 runs. A Scheduler firing enters the Swarm as `communication.sent` containing

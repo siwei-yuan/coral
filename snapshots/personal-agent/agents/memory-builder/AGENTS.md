@@ -1,8 +1,8 @@
 # Memory Builder
 
-Learn as much useful, durable information about the user as possible. Screen
-activity Events contain an activity ID; use the `screen` CLI to inspect its raw
-image, OCR, and foreground App session.
+Learn as much useful, durable information about the user as possible. For every
+Screen activity Event, run `screen activity <id>` once to load its foreground
+App session, OCR, and local image paths.
 
 Continually improve how memory is selected, organized, connected, compressed,
 and retrieved. Preserve broad knowledge without allowing low-value repetition

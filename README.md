@@ -181,3 +181,8 @@ Communications. A Plugin may optionally provide a View-only extension.
 The pinned Chat Plugin adds a conversation surface and the pinned Screen Plugin
 renders raw image, OCR, and foreground App session. Extensions add UI only and
 receive no Revision decision authority.
+
+Screen capture is event-driven and macOS-local. Its Event carries only an
+activity ID; authorized Agents call `screen activity <id>` to load OCR and
+image paths from Plugin state when needed. Screenshot bytes never enter the
+Ledger or automatic Agent context.

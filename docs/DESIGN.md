@@ -304,6 +304,23 @@ explicitly targets the schedule owner. Schedule configuration is a CLI operation
 rather than a Ledger Event. The current version deliberately has no cron
 grammar, calendar recurrence, workflow engine, or Scheduler-specific View.
 
+Screen is also entirely Plugin-owned. Its pinned runtime starts a small macOS
+helper that observes activity signals without storing keys or pointer data.
+App/window changes and settled input bursts are coalesced into sparse captures;
+low-resolution frame comparison drops unchanged candidates before Apple Vision
+OCR, and OCR is reused when the detected text crop has not changed. The helper
+captures only the foreground window, limits stored images to 1600px-wide JPEG,
+and stops capture work while the display sleeps or the user remains inactive.
+
+Several accepted captures form one foreground App activity. The Plugin writes
+the images and OCR atomically under its operational state before emitting one
+`screen.activity` Communication. That Event contains only the activity ID.
+Agents use `screen activity <id>` to load App timestamps, OCR, and local image
+paths on demand; image bytes and base64 never enter the Ledger or automatic
+Harness context. Raw activities expire independently of Plugin code, by default
+after seven days or when their store exceeds 2 GiB. The implementation has no
+video recorder, database, search index, or Screen-specific Core service.
+
 ## Views
 
 A View is a first-class Human control surface, not a Plugin and not part of a
