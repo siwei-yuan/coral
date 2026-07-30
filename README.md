@@ -18,8 +18,8 @@ The runtime has nine concepts:
    and atomically promotes an exact Fork frontier after Human approval.
 7. Plugins own external runtimes and Git-backed code, expose shell CLIs to
    authorized Agents, and activate only through exact Swarm Revision pins.
-8. `SnapshotStore` exports and imports complete reusable Swarm blueprints under
-   `snapshots/`.
+8. `SnapshotStore` exports and imports reusable Swarm blueprints under
+   `snapshots/`; `deploySnapshot` starts one as a fresh Swarm instance.
 9. `DefaultView` projects the Ledger into a local Human control surface for
    topology, evolution, Fork comparison, approval, and denial.
 
@@ -37,6 +37,7 @@ src/
 │   ├── agent/
 │   └── swarm/
 ├── harness/
+├── deployment/
 ├── snapshots/
 └── view/
     └── default/
@@ -53,8 +54,8 @@ strict TypeScript executed directly by Node.js.
 
 This implementation keeps the Ledger and Swarm runtime in process, uses real
 Git repositories and worktrees, and includes native Codex, Claude Code, and Pi
-Adapters. Durable runtime persistence and deployment remain separate concerns;
-they do not change the evolution protocol.
+Adapters. Durable runtime persistence remains separate from deploying a
+Snapshot as a fresh Swarm; neither changes the evolution protocol.
 
 ## Core lifecycle
 
@@ -137,10 +138,28 @@ Auditor as four independently evolving workspaces. Chat, Screen, and Scheduler
 bindings live in its Swarm Definition; live messages, captures, and schedules
 remain Plugin-owned runtime state outside the Snapshot.
 
+Every Plugin commit contains `runtime.mjs`, `bin/<command>.mjs`, and optionally
+`view.mjs`. An authorized Agent edits all of them through the same Plugin draft
+workspace. Only a Human-approved Swarm Revision changes the commit used by the
+running runtime, Agent CLI, and optional View together.
+
 ## Run
 
 ```bash
 npm run check
+```
+
+Deploy a portable Snapshot as a fresh running Swarm:
+
+```ts
+const deployment = await deploySnapshot({
+  snapshots: new SnapshotStore("./snapshots"),
+  name: "personal-agent",
+  instanceRoot: "./instances/personal-agent",
+  human: "owner",
+})
+
+const { url } = await deployment.view.listen({ port: 3000 })
 ```
 
 Once a `Swarm` is running, its built-in Human surface is one object:
@@ -159,6 +178,6 @@ clickable nodes; Agent cards show the current workspace head and resumable
 Harness checkpoint, while turn rows expose causal input and committed effects.
 It also renders every Plugin generically from its Definition and inbound
 Communications. A Plugin may optionally provide a View-only extension.
-`ChatView` adds a conversation surface backed by Chat's own sent-message store;
-`ScreenView` renders Screen's raw image, OCR, and foreground App session.
-Extensions add UI only and receive no Revision decision authority.
+The pinned Chat Plugin adds a conversation surface and the pinned Screen Plugin
+renders raw image, OCR, and foreground App session. Extensions add UI only and
+receive no Revision decision authority.

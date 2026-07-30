@@ -33,6 +33,7 @@ export interface LedgerEvent {
 
 export class Ledger {
   #events: LedgerEvent[] = []
+  #listeners = new Set<(event: LedgerEvent) => void>()
 
   append(draft: EventDraft): LedgerEvent {
     validateDraft(draft)
@@ -55,7 +56,13 @@ export class Ledger {
     const hash = digest(body)
     const event = immutable<LedgerEvent>({ id: `event_${seq}_${hash.slice(0, 12)}`, ...body, hash })
     this.#events.push(event)
+    for (const listener of this.#listeners) listener(event)
     return event
+  }
+
+  subscribe(listener: (event: LedgerEvent) => void): () => void {
+    this.#listeners.add(listener)
+    return () => this.#listeners.delete(listener)
   }
 
   get(id: string): LedgerEvent {

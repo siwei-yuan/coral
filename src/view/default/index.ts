@@ -9,16 +9,20 @@ import { renderDefaultView, renderExtensionPage } from "./render.ts"
 export class DefaultView {
   readonly swarm: Swarm
   readonly human: string
-  readonly #extensions: Map<string, ViewExtension>
+  readonly #extensionSource: () => ViewExtension[]
 
-  constructor({ swarm, human, extensions = [] }: { swarm: Swarm; human: string; extensions?: ViewExtension[] }) {
+  constructor({
+    swarm,
+    human,
+    extensions = () => [],
+  }: {
+    swarm: Swarm
+    human: string
+    extensions?: () => ViewExtension[]
+  }) {
     this.swarm = swarm
     this.human = human
-    this.#extensions = new Map()
-    for (const extension of extensions) {
-      if (this.#extensions.has(extension.plugin)) throw new Error(`Duplicate View extension: ${extension.plugin}`)
-      this.#extensions.set(extension.plugin, extension)
-    }
+    this.#extensionSource = extensions
   }
 
   model(): DefaultViewModel {
@@ -88,7 +92,7 @@ export class DefaultView {
 
   #links(): ViewExtensionLink[] {
     const activePlugins = new Set(this.swarm.activeRevision().definition.plugins.map((plugin) => plugin.id))
-    return [...this.#extensions.values()].filter((extension) => activePlugins.has(extension.plugin)).map((extension) => this.#link(extension))
+    return [...this.#extensions().values()].filter((extension) => activePlugins.has(extension.plugin)).map((extension) => this.#link(extension))
   }
 
   #link(extension: ViewExtension): ViewExtensionLink {
@@ -96,11 +100,20 @@ export class DefaultView {
   }
 
   #extension(plugin: string): ViewExtension {
-    const extension = this.#extensions.get(plugin)
+    const extension = this.#extensions().get(plugin)
     if (!extension || !this.swarm.activeRevision().definition.plugins.some((binding) => binding.id === plugin)) {
       throw new Error(`View extension is not active: ${plugin}`)
     }
     return extension
+  }
+
+  #extensions(): Map<string, ViewExtension> {
+    const extensions = new Map<string, ViewExtension>()
+    for (const extension of this.#extensionSource()) {
+      if (extensions.has(extension.plugin)) throw new Error(`Duplicate View extension: ${extension.plugin}`)
+      extensions.set(extension.plugin, extension)
+    }
+    return extensions
   }
 }
 

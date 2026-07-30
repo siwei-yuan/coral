@@ -104,7 +104,7 @@ export async function createFixture(t: TestContext) {
 export function pluginSeed(id: string): WorkspaceFiles {
   return {
     [`bin/${id}.mjs`]: `#!/usr/bin/env node\nconsole.log(${JSON.stringify(`${id}:v1`)})\n`,
-    "runtime.ts": `export const version = ${JSON.stringify(`${id}:v1`)}\n`,
+    "runtime.mjs": runtimeSource(`${id}:v1`),
   }
 }
 
@@ -233,7 +233,7 @@ class ScriptedHarnessAdapter implements HarnessAdapter {
     if (data.command === "improve-plugin") {
       const plugin = pluginWorkspaces.find((workspace) => workspace.id === data.pluginId)
       if (!plugin?.writable) throw new Error(`Plugin workspace is not writable: ${data.pluginId}`)
-      await writeFile(join(plugin.directory, "runtime.ts"), `export const version = ${JSON.stringify(data.version)}\n`)
+      await writeFile(join(plugin.directory, "runtime.mjs"), runtimeSource(data.version ?? "unknown"))
     }
     if (data.command === "improve-agent") {
       await appendFile(join(workingDirectory, "AGENTS.md"), "Evolved responsibility: verify the result.\n")
@@ -278,6 +278,18 @@ class ScriptedHarnessAdapter implements HarnessAdapter {
       checkpoint: { harness: this.id, sessionId, turnId },
     }
   }
+}
+
+function runtimeSource(version: string): string {
+  return `import { mkdir, writeFile } from "node:fs/promises"
+import { join } from "node:path"
+export const version = ${JSON.stringify(version)}
+export async function start({ stateRoot }) {
+  await mkdir(stateRoot, { recursive: true })
+  await writeFile(join(stateRoot, "active-version.txt"), version)
+  return { async stop() {} }
+}
+`
 }
 
 function contextInputEvents(context: ContextMessage[]): Array<{ scope: { kind: "active" } | { kind: "fork"; forkId: string }; data: unknown }> {

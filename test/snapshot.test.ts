@@ -3,7 +3,7 @@ import test from "node:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { AgentRuntime, GitWorkspaceStore, Ledger, PluginWorkspaceRuntime, SnapshotStore, Swarm } from "../src/index.ts"
+import { AgentRuntime, deploySnapshot, GitWorkspaceStore, Ledger, PluginWorkspaceRuntime, SnapshotStore, Swarm } from "../src/index.ts"
 import { createFixture } from "../test-support/fixture.ts"
 
 test("a Snapshot round-trips the complete Definition and Agent workspace seeds", async (t) => {
@@ -30,7 +30,7 @@ test("a Snapshot round-trips the complete Definition and Agent workspace seeds",
     adapters: [],
     pluginWorkspaces: importedPlugins,
   })
-  const imported = await snapshots.instantiate("baseline", importedRuntime, importedPlugins)
+  const imported = await snapshots.install("baseline", importedRuntime, importedPlugins)
 
   assert.deepEqual(imported.definition, revision.definition)
   assert.equal(imported.manifest.source.revisionId, revision.id)
@@ -41,8 +41,8 @@ test("a Snapshot round-trips the complete Definition and Agent workspace seeds",
   const chatCommit = revision.definition.plugins.find((plugin) => plugin.id === "chat")!.commit
   assert.equal(imported.pluginHeads.chat, chatCommit)
   assert.equal(
-    await importedPluginGit.read("chat", chatCommit, "runtime.ts"),
-    await pluginGit.read("chat", chatCommit, "runtime.ts"),
+    await importedPluginGit.read("chat", chatCommit, "runtime.mjs"),
+    await pluginGit.read("chat", chatCommit, "runtime.mjs"),
   )
   assert.equal(
     await importedWorkspaces.read("builder", imported.agentHeads.builder!, "context/initial.md"),
@@ -56,7 +56,7 @@ test("the bundled Continual Harness snapshot is a bootstrappable Actor-Refiner S
   const snapshots = new SnapshotStore(join(process.cwd(), "snapshots"))
   const workspaces = new GitWorkspaceStore(join(root, "workspaces"))
   const agentRuntime = new AgentRuntime({ ledger: new Ledger(), workspaces, adapters: [] })
-  const imported = await snapshots.instantiate("continual-harness", agentRuntime)
+  const imported = await snapshots.install("continual-harness", agentRuntime)
 
   assert.deepEqual(
     imported.definition.agents.map((agent) => agent.id),
@@ -86,7 +86,7 @@ test("the bundled Personal Agent snapshot owns four evolvable Agent workspaces",
   const ledger = new Ledger()
   const pluginWorkspaces = new PluginWorkspaceRuntime({ ledger, workspaces: pluginGit })
   const agentRuntime = new AgentRuntime({ ledger, workspaces, adapters: [], pluginWorkspaces })
-  const imported = await snapshots.instantiate("personal-agent", agentRuntime, pluginWorkspaces)
+  const imported = await snapshots.install("personal-agent", agentRuntime, pluginWorkspaces)
   const swarm = new Swarm({ ledger, agentRuntime })
   const revision = await swarm.bootstrap({ definition: imported.definition, agentHeads: imported.agentHeads, human: "owner" })
 
@@ -114,4 +114,25 @@ test("the bundled Personal Agent snapshot owns four evolvable Agent workspaces",
     await workspaces.read("auditor", imported.agentHeads.auditor!, "context.ts"),
     /export default async function compose/,
   )
+})
+
+test("a Snapshot deploys as one running Swarm with pinned Plugin runtimes", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "corallum-deployment-"))
+  const deployment = await deploySnapshot({
+    snapshots: new SnapshotStore(join(process.cwd(), "snapshots")),
+    name: "personal-agent",
+    instanceRoot: root,
+    human: "owner",
+    adapters: [],
+  })
+  t.after(async () => {
+    await deployment.stop()
+    await rm(root, { recursive: true, force: true })
+  })
+
+  assert.deepEqual(
+    deployment.swarm.activeRevision().definition.plugins.map((plugin) => plugin.commit),
+    deployment.manifest.definition.plugins.map((plugin) => plugin.commit),
+  )
+  assert.equal(deployment.ledger.verify(), true)
 })

@@ -58,6 +58,14 @@ export class PluginWorkspaceRuntime {
     }
   }
 
+  async assertRuntime(pluginId: string, commit: string): Promise<void> {
+    try {
+      await this.workspaces.read(pluginId, commit, "runtime.mjs")
+    } catch {
+      throw new Error(`Plugin runtime is missing at pinned commit: ${pluginId}`)
+    }
+  }
+
   commitEvent(pluginId: string, commit: string): LedgerEvent {
     const event = this.ledger.all().find((candidate) => {
       if (candidate.type !== "plugin.workspace.initialized" && candidate.type !== "plugin.workspace.committed") {

@@ -209,7 +209,7 @@ function short(id: string): string {
   return escapeHtml(id.length > 18 ? `${id.slice(0, 9)}…${id.slice(-6)}` : id)
 }
 
-export function escapeHtml(value: string): string {
+function escapeHtml(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;")
 }
 

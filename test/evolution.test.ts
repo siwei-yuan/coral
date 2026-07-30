@@ -1,6 +1,9 @@
 import assert from "node:assert/strict"
+import { readFile } from "node:fs/promises"
+import { join } from "node:path"
 import test from "node:test"
 import { projectLedger } from "../src/index.ts"
+import { PluginRuntimeHost } from "../src/deployment/plugin-runtime.ts"
 import { contextText, createFixture, proposeFromAgent, userMessage } from "../test-support/fixture.ts"
 
 test("a workspace commit immediately changes the Agent's next turn without a Swarm Proposal", async (t) => {
@@ -79,7 +82,10 @@ test("Harness checkpoints resume until a workspace or Swarm snapshot boundary fo
 })
 
 test("Plugin drafts evolve immediately but only a Human-approved Swarm Revision changes the active pin", async (t) => {
-  const { swarm, ledger, definition, adapter, pluginGit } = await createFixture(t)
+  const { root, swarm, ledger, definition, adapter, pluginGit, pluginWorkspaces } = await createFixture(t)
+  const runtimeState = join(root, "plugin-state")
+  const runtimes = new PluginRuntimeHost({ swarm, workspaces: pluginWorkspaces, stateRoot: runtimeState })
+  await runtimes.start()
   const v1 = definition.plugins[0]!.commit
 
   const edit = async (version: string) => {
@@ -102,7 +108,7 @@ test("Plugin drafts evolve immediately but only a Human-approved Swarm Revision 
   assert.equal(swarm.pluginDraftHead("chat"), v3)
   assert.equal(adapter.runs.at(-1)?.pluginWorkspaces[0]?.activeCommit, v1)
   assert.equal(adapter.runs.at(-1)?.pluginWorkspaces[0]?.draftCommit, v2)
-  assert.match(await pluginGit.read("chat", v3, "runtime.ts"), /chat:v3/)
+  assert.match(await pluginGit.read("chat", v3, "runtime.mjs"), /chat:v3/)
 
   const proposedDefinition = structuredClone(definition)
   proposedDefinition.plugins[0]!.commit = v3
@@ -123,10 +129,12 @@ test("Plugin drafts evolve immediately but only a Human-approved Swarm Revision 
 
   const v4 = (await edit("chat:v4")).pluginWorkspaceCommits.chat!.commit
   const revision = await swarm.approve(fork.id, evaluated.frontier, "owner")
+  await runtimes.settled()
 
   assert.equal(revision.definition.plugins[0]!.commit, v3)
   assert.equal(swarm.activeRevision().definition.plugins[0]!.commit, v3)
   assert.equal(swarm.pluginDraftHead("chat"), v4)
+  assert.equal(await readFile(join(runtimeState, "chat", "active-version.txt"), "utf8"), "chat:v3")
   const activation = ledger.all().findLast((event) => event.type === "swarm.revision.activated")
   assert.equal(
     (activation?.data as { revision: { definition: typeof definition } }).revision.definition.plugins[0]!.commit,
@@ -143,6 +151,7 @@ test("Plugin drafts evolve immediately but only a Human-approved Swarm Revision 
   await edit("chat:v5")
   assert.equal(adapter.runs.at(-1)?.pluginWorkspaces[0]?.activeCommit, v3)
   assert.equal(adapter.runs.at(-1)?.pluginWorkspaces[0]?.draftCommit, v4)
+  await runtimes.stop()
 })
 
 test("a Revision snapshots Agent commits and Forks can start from any Revision or Proposal", async (t) => {

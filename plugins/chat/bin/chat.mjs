@@ -11,8 +11,8 @@ if (!command || command === "--help" || command === "help") {
 }
 
 if (command !== "reply") fail(`unknown command: ${command}`)
-const stateRoot = process.env.CORALLUM_CHAT_STATE
-if (!stateRoot) fail("CORALLUM_CHAT_STATE is required")
+const stateRoot = process.env.CORALLUM_PLUGIN_STATE
+if (!stateRoot) fail("CORALLUM_PLUGIN_STATE is required")
 
 const reply = {
   conversationId: option(args, "--conversation"),

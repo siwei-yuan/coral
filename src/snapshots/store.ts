@@ -87,7 +87,7 @@ export class SnapshotStore {
     return immutable({ ...parsed, definition })
   }
 
-  async instantiate(
+  async install(
     name: string,
     agentRuntime: AgentRuntime,
     pluginWorkspaces?: PluginWorkspaceRuntime,

@@ -36,10 +36,7 @@ interface AppendInput {
   schema?: string
 }
 
-export interface PluginEnvironment {
-  id: string
-  env: Record<string, string>
-}
+export type PluginEnvironment = (pluginId: string) => Record<string, string>
 
 export interface SwarmTurnResult extends AgentTurnResult {
   outputEvents: LedgerEvent[]
@@ -57,7 +54,7 @@ export class Swarm {
   #forks = new Map<string, MutableFork>()
   #agentHeads = new Map<string, string>()
   #pluginDraftHeads = new Map<string, string>()
-  #pluginEnvironments = new Map<string, Record<string, string>>()
+  readonly #pluginEnvironment: PluginEnvironment
   #mainHarness = new Map<string, HarnessState>()
   #forkHarness = new Map<string, Map<string, HarnessState>>()
   #activeRevisionId: string | null = null
@@ -70,15 +67,15 @@ export class Swarm {
   constructor({
     ledger,
     agentRuntime,
-    pluginEnvironments = [],
+    pluginEnvironment = () => ({}),
   }: {
     ledger: Ledger
     agentRuntime: AgentRuntime
-    pluginEnvironments?: PluginEnvironment[]
+    pluginEnvironment?: PluginEnvironment
   }) {
     this.ledger = ledger
     this.agentRuntime = agentRuntime
-    this.#pluginEnvironments = new Map(pluginEnvironments.map((plugin) => [plugin.id, plugin.env]))
+    this.#pluginEnvironment = pluginEnvironment
   }
 
   async bootstrap({ definition, agentHeads, human }: BootstrapInput): Promise<SwarmRevision> {
@@ -831,6 +828,7 @@ export class Swarm {
     for (const plugin of definition.plugins) {
       await pluginWorkspaces.assertCommit(plugin.id, plugin.commit)
       await pluginWorkspaces.assertCommand(plugin.id, plugin.commit, plugin.command)
+      await pluginWorkspaces.assertRuntime(plugin.id, plugin.commit)
     }
   }
 
@@ -845,8 +843,8 @@ export class Swarm {
         ...(binding.exposedTo.includes(agentId) ? { command: binding.command } : {}),
         mode: binding.mode,
         activeCommit: binding.commit,
-        ...(writable ? { draftCommit: this.pluginDraftHead(binding.id) } : {}),
-        ...(this.#pluginEnvironments.has(binding.id) ? { env: this.#pluginEnvironments.get(binding.id)! } : {}),
+        ...(writable && binding.exposedTo.includes(agentId) ? { draftCommit: this.pluginDraftHead(binding.id) } : {}),
+        env: this.#pluginEnvironment(binding.id),
       }))
   }
 

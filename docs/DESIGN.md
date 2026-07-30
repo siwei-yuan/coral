@@ -247,20 +247,34 @@ of the current implementation.
 
 ## Plugins
 
-A Plugin owns an external runtime and exposes one shell command to selected
-Agents. Its code lives in its own Git workspace; mutable runtime data remains
-outside both Plugin and Agent workspaces. `SwarmDefinition` pins the exact code
-commit and declares the command, mode, and Agents that may call it. The Harness
-receives a command resolved from `bin/<command>.mjs` at that pinned checkout.
-The current implementation does not claim OS-level command isolation.
+A Plugin is one Git-backed, deployable code unit:
+
+```text
+runtime.mjs          external world -> Swarm
+bin/<command>.mjs    Agent -> Plugin or external world
+view.mjs             optional Plugin-owned View extension
+```
+
+Mutable runtime data remains outside both Plugin and Agent workspaces.
+`SwarmDefinition` pins the exact code commit and declares the command, mode,
+and Agents that may call it. Deployment starts `runtime.mjs` from that checkout
+and the Harness receives `bin/<command>.mjs` from the same checkout. The
+optional View is returned by the runtime and has no control-plane authority.
+The current implementation does not claim OS-level isolation.
 
 CLI calls are Harness operations, not Ledger Events. Plugin Events are inbound:
-Chat Runtime turns user input into a Communication Event, while Screen Runtime
+Chat turns user input into a Communication Event, while Screen
 announces a new activity and lets the Agent query its raw image, OCR, and
 foreground App session through the `screen` CLI. Agent output takes the reverse
 path directly through a Plugin CLI and the Plugin-owned runtime. It does not
 become an outbound Ledger Event. No Plugin copies files into or initializes an
 Agent workspace.
+
+Every runtime exports one `start()` function. Deployment gives it its Plugin
+ID, binding mode, operational state directory, environment, and one `emit()`
+function that accepts only inbound Communication drafts. The runtime owns its
+external integrations and loops and returns `stop()` plus an optional View
+extension. Deployment contains no Chat-, Screen-, or Scheduler-specific code.
 
 Corallum itself exposes two Harness-neutral shell commands. `corallum send`
 records an Agent's request to communicate along a declared Route; `corallum
@@ -283,14 +297,12 @@ Agent-plus-workspace sandbox.
 
 Scheduler is a normal Plugin, not a Core service. Its CLI lets an Agent set,
 remove, and list its own named recurring durations and notes. The Plugin runtime
-must own its clock loop and emit due inbound Communications; a deployment layer
-starts the Plugin but never polls schedules or configures one for an Agent. Each
+owns its clock loop and emits due inbound Communications; deployment starts the
+Plugin but never polls schedules or configures one for an Agent. Each
 firing contains the name, exact duration, scheduled time, and note, and
 explicitly targets the schedule owner. Schedule configuration is a CLI operation
 rather than a Ledger Event. The current version deliberately has no cron
-grammar, calendar recurrence, workflow engine, or Scheduler-specific View. The
-implemented `due()` API is an interim mismatch and must be replaced by the
-Plugin-owned loop before generic deployment.
+grammar, calendar recurrence, workflow engine, or Scheduler-specific View.
 
 ## Views
 
@@ -310,11 +322,12 @@ decorative data.
 
 The default View understands Plugins only through their Definition and inbound
 Communication Events. It renders ingress routing and CLI exposure without any
-Chat- or Screen-specific branches. A runtime may register an optional
-`ViewExtension` for an active Plugin. The extension owns only its page and
-actions: Chat adds a message surface backed by its Plugin store; Screen renders
-its current activity artifacts. Extensions are not part of SwarmDefinition or
-a Revision and are never given Fork, approve, or deny authority.
+Chat- or Screen-specific branches. An active pinned Plugin runtime may return
+an optional `ViewExtension`. The extension owns only its page and actions: Chat
+adds a message surface backed by its Plugin store; Screen renders its current
+activity artifacts. The extension code evolves with the Plugin commit but is
+not separately declared in `SwarmDefinition` and is never given Fork, approve,
+or deny authority.
 
 The Ledger is the control-plane source of truth, not a container for all raw
 bytes. A View follows Ledger references to Git for workspace files, Harness
@@ -328,9 +341,10 @@ Plugin evolution follows the same draft-versus-active separation as Agent
 self-evolution, without adding an independent Plugin approval system.
 
 Each Plugin owns one Git-backed code workspace and one serialized draft head.
-An Agent may see and edit that draft when it either receives that Plugin's
-ingress or appears in `exposedTo`; no second edit-permission field exists. A
-successful edit creates a Git commit and a high-level
+An Agent in `exposedTo` may edit the whole draft, including runtime, CLI, and
+optional View. An ingress-only Agent sees the active Plugin source read-only;
+no second edit-permission field exists. A successful edit creates a Git commit
+and a high-level
 `plugin.workspace.committed` Event attributed to the Agent. The commit
 immediately advances the draft head but never changes the active code.
 Initialization is backed by `plugin.workspace.initialized`.
@@ -348,7 +362,9 @@ When an Agent proposes a complete Swarm Revision, it may change Chat's pin from
 mock/isolated mode. Plugin code is read-only inside those evaluation Forks in
 the first version: further Plugin edits require another Main draft commit and a
 later Proposal. Human approval activates the selected Swarm Revision and all of
-its Plugin pins together. There is no independent Plugin activation Event.
+its Plugin pins together. The runtime host observes the existing
+`swarm.revision.activated` Event and replaces changed pinned runtimes. There is
+no independent Plugin activation Event.
 
 A Proposal uses literal commit IDs only. A turn cannot edit a Plugin and pin
 that newly created commit in the same Proposal action: the commit does not
@@ -393,8 +409,12 @@ running Swarm can still reconstruct Revision/Proposal checkpoints from its
 Ledger and native Harness storage. The portable Snapshot is a reusable starting
 state, not a replacement for that Ledger or an exact forensic archive.
 
-Snapshot import now resolves exact Plugin code. A generic deployment runner is
-still separate work: it must start each external Plugin runtime from the same
-pinned checkout and supply operational state and secrets without putting them
-in the Snapshot. It must never resolve a mutable local Plugin folder by name
-alone.
+`deploySnapshot()` creates one fresh instance, imports its Agent and Plugin Git
+objects, bootstraps the initial Revision, starts every pinned Plugin runtime,
+and exposes the running Swarm and Default View. Plugin state and secrets are
+supplied under the instance root and remain outside the Snapshot. A later
+Revision activation replaces only runtimes whose pinned commit or mode changed.
+Deployment never resolves a mutable local Plugin folder by name alone.
+
+Durable Ledger persistence and resuming an existing deployed instance remain
+separate from deploying a portable Snapshot as a fresh Swarm.

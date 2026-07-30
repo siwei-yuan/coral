@@ -18,6 +18,11 @@ are not part of this Snapshot. Each Agent creates schedules after it first
 runs. A Scheduler firing enters the Swarm as `communication.sent` containing
 the exact schedule, name, scheduled time, and Agent-authored note.
 
+Each Plugin bundle pins its external `runtime.mjs`, Agent CLI, and optional
+View extension as one Git commit. Agents named in `exposedTo` may evolve that
+whole Plugin draft, but it becomes active only through a later approved Swarm
+Revision.
+
 Each role, memory layout, skill, and context composer lives in its Agent's
 ordinary Git workspace. Routes, Plugin bindings, tests, and Agent composition
 belong to the complete Swarm Definition and change only through a Human-gated
