@@ -22,13 +22,19 @@ export function renderDefaultView(
       <header class="section-head"><div><h2>Evolution Canvas</h2><p>Zoom into a running state to inspect its Agent and Plugin commit timeline.</p></div><span class="section-badge" data-evolution-mode>Revision map</span></header>
       ${model.evolution.length ? evolutionCanvas(model) : empty("No evolution recorded")}
     </section>
-    <section class="surface topology-section">
-      <header class="section-head"><div><h2>Swarm Topology</h2><p>Configured Agent routes and Plugin access, replayed directly from Ledger Events.</p></div><span class="section-badge" data-range-count>${model.events.length} Events</span></header>
-      ${active ? topologySector(active.definition, model.events) : empty("No active Revision")}
-    </section>
+    ${renderTopologySection(model)}
     ${infoDialog()}`,
     extensions,
   )
+}
+
+export function renderTopologySection(model: DefaultViewModel): string {
+  const active = model.activeRevision
+  const head = model.events.at(-1)?.seq ?? 0
+  return `<section class="surface topology-section" data-ledger-head="${head}">
+    <header class="section-head"><div><h2>Swarm Topology</h2><p>Configured Agent routes and Plugin access, replayed directly from Ledger Events.</p></div><span class="section-badge" data-range-count>${model.events.length} Events</span></header>
+    ${active ? topologySector(active.definition, model.events) : empty("No active Revision")}
+  </section>`
 }
 
 export function renderExtensionPage(
@@ -39,15 +45,15 @@ export function renderExtensionPage(
 ): string {
   return page(
     extension.title,
-    `${notice ? `<p class="notice">${escapeHtml(notice)}</p>` : ""}<header class="hero compact"><div><p class="eyebrow">${escapeHtml(extension.plugin)} extension</p><h1>${escapeHtml(extension.title)}</h1></div></header><section class="surface extension">${content}</section>`,
+    `${notice ? `<p class="notice">${escapeHtml(notice)}</p>` : ""}<header class="hero compact"><div><p class="eyebrow">Plugin view</p><h1>${escapeHtml(extension.title)}</h1></div></header><section class="surface extension" data-extension="${escapeHtml(extension.plugin)}">${content}</section>`,
     extensions,
     extension.plugin,
   )
 }
 
 function page(title: string, content: string, extensions: ViewExtensionLink[], active?: string): string {
-  const links = extensions.map((item) => `<a class="nav-link${item.plugin === active ? " active" : ""}" href="/extensions/${encodeURIComponent(item.plugin)}">${escapeHtml(item.title)}</a>`).join("")
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · Corallum</title><style>${styles}</style></head><body><nav><a class="brand" href="/">Corallum</a><div class="nav-items"><a class="nav-link${active ? "" : " active"}" href="/">Overview</a>${links}</div></nav><main>${content}</main><script>${viewScript}</script></body></html>`
+  const links = extensions.map((item) => `<a class="nav-link${item.plugin === active ? " active" : ""}" href="/extensions/${encodeURIComponent(item.plugin)}"${item.plugin === active ? ` aria-current="page"` : ""}>${escapeHtml(item.title)}</a>`).join("")
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · Corallum</title><style>${styles}</style></head><body class="${active ? "extension-page" : "overview-page"}"><nav><a class="brand" href="/">Corallum</a><div class="nav-items"><a class="nav-link${active ? "" : " active"}" href="/"${active ? "" : ` aria-current="page"`}>Overview</a>${links}</div></nav><main>${content}</main><script>${viewScript}</script></body></html>`
 }
 
 function infoDialog(): string {

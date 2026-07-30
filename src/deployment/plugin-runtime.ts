@@ -79,6 +79,7 @@ export class PluginRuntimeHost {
   async settled(): Promise<void> {
     await this.#pending
     if (this.#failure) throw this.#failure
+    await this.swarm.settled()
   }
 
   extensions(): ViewExtension[] {
@@ -135,7 +136,7 @@ export class PluginRuntimeHost {
             throw new Error(`Plugin runtime is no longer active: ${binding.id}`)
           }
           const event = this.swarm.ingest({ ...draft, scope: activeScope() })
-          await this.swarm.dispatch(event.id)
+          this.swarm.route(event.id)
         },
       })
       if (!instance || typeof instance.stop !== "function") {

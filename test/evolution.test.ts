@@ -11,9 +11,9 @@ test("a workspace commit immediately changes the Agent's next turn without a Swa
     command: "improve-agent",
   }))
 
-  const first = await swarm.runAgentTurn({ agentId: "builder", inputEventId: improvement.id })
+  const first = await swarm.runAgentTurn({ agentId: "builder", inputEventIds: [improvement.id] })
   const followup = swarm.appendInput(userMessage("builder", "use your improved workspace"))
-  const second = await swarm.runAgentTurn({ agentId: "builder", inputEventId: followup.id })
+  const second = await swarm.runAgentTurn({ agentId: "builder", inputEventIds: [followup.id] })
 
   assert.notEqual(first.workspaceCommit.commit, initial.commit)
   assert.equal(swarm.agentHead("builder"), second.workspaceCommit.commit)
@@ -43,7 +43,7 @@ test("a turn records Agent-authored commits and restores uncommitted changes", a
   const committed = swarm.appendInput(userMessage("builder", "record two durable learnings", {
     command: "two-agent-commits",
   }))
-  const result = await swarm.runAgentTurn({ agentId: "builder", inputEventId: committed.id })
+  const result = await swarm.runAgentTurn({ agentId: "builder", inputEventIds: [committed.id] })
 
   assert.equal(result.workspaceEvents.length, 2)
   assert.deepEqual(
@@ -57,7 +57,7 @@ test("a turn records Agent-authored commits and restores uncommitted changes", a
   assert.equal(swarm.agentHead("builder"), result.workspaceCommit.commit)
 
   const dirty = swarm.appendInput(userMessage("builder", "leave this uncommitted", { command: "leave-dirty" }))
-  const restored = await swarm.runAgentTurn({ agentId: "builder", inputEventId: dirty.id })
+  const restored = await swarm.runAgentTurn({ agentId: "builder", inputEventIds: [dirty.id] })
   const turn = restored.turnEvent.data as { outcome: string; failure?: string }
   assert.deepEqual(restored.workspaceEvents.map((event) => event.type), ["agent.workspace.restored"])
   assert.equal(restored.workspaceCommit.commit, result.workspaceCommit.commit)
@@ -72,7 +72,7 @@ test("Harness checkpoints resume until a workspace or Swarm snapshot boundary fo
   const { swarm, adapter, ledger } = await createFixture(t)
   const run = async (text: string, data: Record<string, unknown> = {}) => {
     const event = swarm.appendInput(userMessage("builder", text, data))
-    return swarm.runAgentTurn({ agentId: "builder", inputEventId: event.id })
+    return swarm.runAgentTurn({ agentId: "builder", inputEventIds: [event.id] })
   }
 
   const first = await run("observe")
@@ -125,7 +125,7 @@ test("Plugin drafts evolve immediately but only a Human-approved Swarm Revision 
       pluginId: "chat",
       version,
     }))
-    return swarm.runAgentTurn({ agentId: "builder", inputEventId: input.id })
+    return swarm.runAgentTurn({ agentId: "builder", inputEventIds: [input.id] })
   }
 
   const v2Turn = await edit("chat:v2")
@@ -189,12 +189,12 @@ test("a Revision snapshots Agent commits and Forks can start from any Revision o
   const { swarm, ledger, definition, revision } = await createFixture(t)
   for (const request of ["improve context", "improve memory"]) {
     const input = swarm.appendInput(userMessage("builder", request, { command: "improve-agent" }))
-    await swarm.runAgentTurn({ agentId: "builder", inputEventId: input.id })
+    await swarm.runAgentTurn({ agentId: "builder", inputEventIds: [input.id] })
   }
   const reviewInput = swarm.appendInput(userMessage("reviewer", "improve review procedure", {
     command: "improve-agent",
   }))
-  await swarm.runAgentTurn({ agentId: "reviewer", inputEventId: reviewInput.id })
+  await swarm.runAgentTurn({ agentId: "reviewer", inputEventIds: [reviewInput.id] })
   const proposedDefinition = structuredClone(definition)
   proposedDefinition.routes.push({ from: "reviewer", to: "builder" })
   const proposal = await proposeFromAgent(swarm, {
@@ -256,7 +256,7 @@ test("the selected Fork becomes Main and later Main workspace commits continue a
   const continued = swarm.appendInput(userMessage("builder", "continue evolving while the Proposal is evaluated", {
     command: "continue-main",
   }))
-  const tail = await swarm.runAgentTurn({ agentId: "builder", inputEventId: continued.id })
+  const tail = await swarm.runAgentTurn({ agentId: "builder", inputEventIds: [continued.id] })
   const oldMainHead = tail.workspaceCommit.commit
 
   const promoted = await swarm.approve(fork.id, forkResult.frontier, "owner")
@@ -299,7 +299,7 @@ test("a workspace conflict leaves the old Main intact", async (t) => {
   const continued = swarm.appendInput(userMessage("builder", "write the same Main workspace file differently", {
     command: "improve-agent",
   }))
-  const tail = await swarm.runAgentTurn({ agentId: "builder", inputEventId: continued.id })
+  const tail = await swarm.runAgentTurn({ agentId: "builder", inputEventIds: [continued.id] })
 
   await assert.rejects(swarm.approve(fork.id, forkResult.frontier, "owner"), /Cannot reapply commit for workspace/)
   assert.equal(swarm.activeRevision().id, revision.id)

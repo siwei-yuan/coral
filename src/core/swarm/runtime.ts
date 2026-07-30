@@ -58,7 +58,12 @@ export class Swarm {
   #mainHarness = new Map<string, HarnessState>()
   #forkHarness = new Map<string, Map<string, HarnessState>>()
   #activeRevisionId: string | null = null
-  #mainOperations: Promise<unknown> = Promise.resolve()
+  #pending = new Map<string, string[]>()
+  #running = new Map<string, Promise<void>>()
+  #failures: unknown[] = []
+  #activationBarrier = false
+  #activationOperations: Promise<unknown> = Promise.resolve()
+  #mainSessionGeneration = 0
   #forkOperations = new Map<string, Promise<unknown>>()
 
   readonly ledger: Ledger
@@ -197,42 +202,75 @@ export class Swarm {
     })
   }
 
-  async runAgentTurn(input: { agentId: string; inputEventId: string }): Promise<SwarmTurnResult> {
-    return this.#withMain(() => this.#runAgentTurn(input))
-  }
-
-  async dispatch(inputEventId: string): Promise<SwarmTurnResult[]> {
-    return this.#withMain(() => this.#dispatch(inputEventId))
-  }
-
-  async #dispatch(inputEventId: string): Promise<SwarmTurnResult[]> {
-    const input = this.ledger.get(inputEventId)
-    if (input.scope.kind !== "active") throw new Error("Main dispatch requires an active-scoped Event")
-    const queue = [input]
-    const turns: SwarmTurnResult[] = []
-    while (queue.length > 0) {
-      const event = queue.shift()!
-      for (const agentId of communicationTargets(this.activeRevision().definition, event)) {
-        if (turns.length >= 100) throw new Error("Main exceeded 100 Agent deliveries")
-        const result = await this.#runAgentTurn({ agentId, inputEventId: event.id })
-        turns.push(result)
-        queue.push(...result.outputEvents)
+  runAgentTurn(input: { agentId: string; inputEventIds: string[] }): Promise<SwarmTurnResult> {
+    if (this.#activationBarrier || this.#running.has(input.agentId) || this.#pending.get(input.agentId)?.length) {
+      throw new Error(`Agent already has scheduled work: ${input.agentId}`)
+    }
+    const definition = this.activeRevision().definition
+    const inputs = input.inputEventIds.map((eventId) => this.ledger.get(eventId))
+    for (const event of inputs) {
+      if (!communicationTargets(definition, event).includes(input.agentId)) {
+        throw new Error(`Communication is not addressed to Agent: ${input.agentId}`)
       }
     }
-    return turns
+    return this.#runAgentTurn({ agentId: input.agentId, inputs })
   }
 
-  async #runAgentTurn({ agentId, inputEventId }: { agentId: string; inputEventId: string }): Promise<SwarmTurnResult> {
+  route(inputEventId: string): void {
+    const input = this.ledger.get(inputEventId)
+    if (input.scope.kind !== "active") throw new Error("Main routing requires an active-scoped Event")
+    for (const agentId of communicationTargets(this.activeRevision().definition, input)) {
+      const pending = this.#pending.get(agentId) ?? []
+      pending.push(input.id)
+      this.#pending.set(agentId, pending)
+      this.#startAgent(agentId)
+    }
+  }
+
+  async settled(): Promise<void> {
+    while (this.#running.size > 0) await Promise.all(this.#running.values())
+    const failure = this.#failures.shift()
+    if (failure) throw failure
+  }
+
+  #startAgent(agentId: string): void {
+    if (this.#activationBarrier || this.#running.has(agentId) || !this.#pending.get(agentId)?.length) return
+    const running = this.#drainAgent(agentId)
+      .catch((error) => { this.#failures.push(error) })
+      .finally(() => {
+        this.#running.delete(agentId)
+        this.#startAgent(agentId)
+      })
+    this.#running.set(agentId, running)
+  }
+
+  async #drainAgent(agentId: string): Promise<void> {
+    while (!this.#activationBarrier) {
+      const pending = this.#pending.get(agentId)
+      if (!pending?.length) return
+      const agent = findAgent(this.activeRevision().definition, agentId)
+      const inputEventIds = agent.turnPolicy === "single-event"
+        ? pending.splice(0, 1)
+        : pending.splice(0)
+      const result = await this.#runAgentTurn({
+        agentId,
+        inputs: inputEventIds.map((eventId) => this.ledger.get(eventId)),
+      })
+      for (const event of result.outputEvents) this.route(event.id)
+    }
+  }
+
+  async #runAgentTurn({ agentId, inputs }: { agentId: string; inputs: LedgerEvent[] }): Promise<SwarmTurnResult> {
     const revision = this.activeRevision()
     const agent = findAgent(revision.definition, agentId)
-    const input = this.ledger.get(inputEventId)
-    if (input.scope.kind !== "active") throw new Error("Agent turn input must be active-scoped")
-    if (input.type === "communication.sent" && !communicationTargets(revision.definition, input).includes(agentId)) {
-      throw new Error(`Communication is not addressed to Agent: ${agentId}`)
+    if (inputs.length === 0) throw new Error("Agent turn requires input Events")
+    for (const input of inputs) {
+      if (input.scope.kind !== "active") throw new Error("Agent turn input must be active-scoped")
     }
     const scope = activeScope()
     const proposalPluginFrontier = this.ledger.head().seq
     const baseCommit = this.agentHead(agentId)
+    const sessionGeneration = this.#mainSessionGeneration
     const harness = this.#mainHarness.get(agentId) ?? {
       checkpoint: null,
       workspaceCommit: baseCommit,
@@ -243,7 +281,7 @@ export class Swarm {
       agent,
       baseCommit,
       scope,
-      inputEvents: [input],
+      inputEvents: inputs,
       workspaceHeads: Object.fromEntries(this.#agentHeads),
       pluginAccess: this.#pluginAccess(revision.definition, agentId, true),
       ...(checkpoint ? { checkpoint } : {}),
@@ -263,7 +301,7 @@ export class Swarm {
     this.#mainHarness.set(agentId, {
       checkpoint: result.checkpoint,
       workspaceCommit: baseCommit,
-      forkNext: result.workspaceCommit.commit !== baseCommit,
+      forkNext: result.workspaceCommit.commit !== baseCommit || sessionGeneration !== this.#mainSessionGeneration,
     })
     for (const [pluginId, pluginCommit] of Object.entries(result.pluginWorkspaceCommits)) {
       this.#pluginDraftHeads.set(pluginId, pluginCommit.commit)
@@ -371,6 +409,7 @@ export class Swarm {
     })
     const proposal = immutable<SwarmProposal>({ id, ...body, eventId: event.id })
     this.#proposals.set(id, proposal)
+    this.#mainSessionGeneration += 1
     this.#freezeMainHarness()
     return proposal
   }
@@ -446,7 +485,32 @@ export class Swarm {
   }
 
   async approve(forkId: string, expectedFrontier: number, human: string): Promise<SwarmRevision> {
-    return this.#withMain(() => this.#withFork(forkId, () => this.#approve(forkId, expectedFrontier, human)))
+    const current = this.#activationOperations.then(
+      () => this.#activate(forkId, expectedFrontier, human),
+      () => this.#activate(forkId, expectedFrontier, human),
+    )
+    this.#activationOperations = current.then(
+      () => undefined,
+      () => undefined,
+    )
+    return current
+  }
+
+  async #activate(forkId: string, expectedFrontier: number, human: string): Promise<SwarmRevision> {
+    this.#activationBarrier = true
+    try {
+      await this.settled()
+      const nextAgents = new Set(this.#mutableFork(forkId).definition.agents.map((agent) => agent.id))
+      for (const agentId of this.#agentHeads.keys()) {
+        if (!nextAgents.has(agentId) && this.#pending.get(agentId)?.length) {
+          throw new Error(`Cannot remove Agent with pending Events: ${agentId}`)
+        }
+      }
+      return await this.#withFork(forkId, () => this.#approve(forkId, expectedFrontier, human))
+    } finally {
+      this.#activationBarrier = false
+      for (const agent of this.activeRevision().definition.agents) this.#startAgent(agent.id)
+    }
   }
 
   async #approve(forkId: string, expectedFrontier: number, human: string): Promise<SwarmRevision> {
@@ -554,6 +618,9 @@ export class Swarm {
     this.#activeRevisionId = id
     this.#agentHeads.clear()
     for (const [agentId, head] of Object.entries(nextHeads)) this.#agentHeads.set(agentId, head)
+    for (const agentId of this.#pending.keys()) {
+      if (!(agentId in nextHeads)) this.#pending.delete(agentId)
+    }
     const selectedHarness = this.#forkHarness.get(fork.id) ?? new Map<string, HarnessState>()
     this.#mainHarness = new Map(
       fork.definition.agents.map((agent) => {
@@ -620,14 +687,32 @@ export class Swarm {
   }
 
   async #drainFork(fork: MutableFork, initialEvents: LedgerEvent[]): Promise<void> {
-    const queue = [...initialEvents]
+    const pending = new Map<string, LedgerEvent[]>()
+    const running = new Map<string, Promise<void>>()
     let deliveries = 0
-    while (queue.length > 0) {
-      const event = queue.shift()!
+    const route = (event: LedgerEvent) => {
       for (const agentId of communicationTargets(fork.definition, event)) {
-        deliveries += 1
-        if (deliveries > 100) throw new Error("Fork exceeded 100 Agent deliveries")
+        const events = pending.get(agentId) ?? []
+        events.push(event)
+        pending.set(agentId, events)
+        start(agentId)
+      }
+    }
+    const start = (agentId: string) => {
+      if (running.has(agentId) || !pending.get(agentId)?.length) return
+      const work = drain(agentId).finally(() => {
+        running.delete(agentId)
+        start(agentId)
+      })
+      running.set(agentId, work)
+    }
+    const drain = async (agentId: string) => {
+      const queue = pending.get(agentId)!
+      while (queue.length > 0) {
         const agent = findAgent(fork.definition, agentId)
+        const inputEvents = agent.turnPolicy === "single-event" ? queue.splice(0, 1) : queue.splice(0)
+        deliveries += inputEvents.length
+        if (deliveries > 100) throw new Error("Fork exceeded 100 Agent deliveries")
         const baseCommit = fork.agentHeads[agent.id]!
         const states = this.#forkHarness.get(fork.id)!
         const harness = states.get(agent.id) ?? {
@@ -640,7 +725,7 @@ export class Swarm {
           agent,
           baseCommit,
           scope: fork.scope,
-          inputEvents: [event],
+          inputEvents,
           workspaceHeads: { ...fork.agentHeads },
           pluginAccess: this.#pluginAccess({ ...fork.definition, plugins: fork.pluginBindings }, agent.id, false),
           ...(checkpoint ? { checkpoint } : {}),
@@ -663,10 +748,12 @@ export class Swarm {
         })
         for (const action of result.actions) {
           if (action.type === "propose") throw new Error("A Fork may not create another Swarm Proposal")
-          queue.push(this.#recordAgentCommunication(fork.definition, agentId, fork.scope, action, result.turnEvent.id))
+          route(this.#recordAgentCommunication(fork.definition, agentId, fork.scope, action, result.turnEvent.id))
         }
       }
     }
+    for (const event of initialEvents) route(event)
+    while (running.size > 0) await Promise.all(running.values())
   }
 
   #recordAgentCommunication(
@@ -798,15 +885,6 @@ export class Swarm {
       }
     }
     throw new Error(`unknown Fork source: ${id}`)
-  }
-
-  #withMain<T>(operation: () => Promise<T>): Promise<T> {
-    const current = this.#mainOperations.then(operation, operation)
-    this.#mainOperations = current.then(
-      () => undefined,
-      () => undefined,
-    )
-    return current
   }
 
   #withFork<T>(forkId: string, operation: () => Promise<T>): Promise<T> {

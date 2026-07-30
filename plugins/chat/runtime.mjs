@@ -31,8 +31,8 @@ export async function start({ id, stateRoot, emit }) {
     const inbound = await readJsonDirectory(inbox)
     const outbound = await readJsonDirectory(outbox)
     return [
-      ...inbound.map((message) => ({ direction: "in", conversationId: message.conversationId, text: message.text, at: message.receivedAt })),
-      ...outbound.map((reply) => ({ direction: "out", conversationId: reply.conversationId, text: reply.text, at: reply.queuedAt })),
+      ...inbound.map((message) => ({ id: message.id, direction: "in", conversationId: message.conversationId, text: message.text, at: message.receivedAt })),
+      ...outbound.map((reply) => ({ id: reply.id, direction: "out", conversationId: reply.conversationId, text: reply.text, at: reply.queuedAt })),
     ].sort((left, right) => left.at.localeCompare(right.at))
   }
 
@@ -44,5 +44,8 @@ export async function start({ id, stateRoot, emit }) {
 
 async function readJsonDirectory(directory) {
   const files = (await readdir(directory)).filter((file) => file.endsWith(".json")).sort()
-  return Promise.all(files.map(async (file) => JSON.parse(await readFile(join(directory, file), "utf8"))))
+  return Promise.all(files.map(async (file) => ({
+    id: file.slice(0, -5),
+    ...JSON.parse(await readFile(join(directory, file), "utf8")),
+  })))
 }

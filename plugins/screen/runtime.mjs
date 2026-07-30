@@ -5,7 +5,7 @@ import { access, mkdir, readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
-import { cleanup, readCurrent, screenConfig, ScreenPipeline } from "./pipeline.mjs"
+import { cleanup, readCapture, readCaptures, screenConfig, ScreenPipeline } from "./pipeline.mjs"
 import { createView } from "./view.mjs"
 
 const execute = promisify(execFile)
@@ -18,9 +18,10 @@ export async function start({ id, mode, stateRoot, env, emit }) {
     mkdir(join(stateRoot, "cache"), { recursive: true }),
   ])
 
-  const current = () => readCurrent(stateRoot)
+  const captures = (before) => readCaptures(stateRoot, before)
+  const captureById = (activityId, captureId) => readCapture(stateRoot, activityId, captureId)
   if (mode !== "live" || env.CORALLUM_SCREEN_DISABLED === "1") {
-    return { view: createView({ current }), async stop() {} }
+    return { view: createView({ captures, capture: captureById }), async stop() {} }
   }
 
   await cleanup(stateRoot)
@@ -28,7 +29,7 @@ export async function start({ id, mode, stateRoot, env, emit }) {
   const pipeline = new ScreenPipeline({
     stateRoot,
     emit,
-    capture: (force) => capture(helper, stateRoot, force),
+    capture: (force) => captureScreen(helper, stateRoot, force),
     config: screenConfig,
   })
   const observer = observe(helper, (signal) => pipeline.signal(signal))
@@ -50,7 +51,7 @@ export async function start({ id, mode, stateRoot, env, emit }) {
   cleanupTimer.unref()
 
   return {
-    view: createView({ current }),
+    view: createView({ captures, capture: captureById }),
     async stop() {
       clearTimeout(visualTimer)
       clearInterval(cleanupTimer)
@@ -95,7 +96,7 @@ function observe(helper, onSignal) {
   return child
 }
 
-async function capture(helper, stateRoot, force) {
+async function captureScreen(helper, stateRoot, force) {
   const { stdout } = await execute(helper, ["capture", stateRoot, force ? "force" : "changed"], {
     timeout: 30_000,
     maxBuffer: 4 * 1024 * 1024,

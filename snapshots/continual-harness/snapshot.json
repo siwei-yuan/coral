@@ -6,11 +6,13 @@
     "agents": [
       {
         "id": "actor",
-        "harness": "codex"
+        "harness": "codex",
+        "turnPolicy": "single-event"
       },
       {
         "id": "refiner",
-        "harness": "codex"
+        "harness": "codex",
+        "turnPolicy": "single-event"
       }
     ],
     "routes": [

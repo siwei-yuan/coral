@@ -49,8 +49,8 @@ export async function createFixture(t: TestContext) {
   })
   const definition: SwarmDefinition = {
     agents: [
-      { id: "builder", harness: "scripted" },
-      { id: "reviewer", harness: "scripted" },
+      { id: "builder", harness: "scripted", turnPolicy: "batch-events" },
+      { id: "reviewer", harness: "scripted", turnPolicy: "single-event" },
     ],
     routes: [{ from: "builder", to: "reviewer" }],
     pluginIngress: [{ plugin: "chat", ingressTo: "builder" }],
@@ -138,7 +138,7 @@ export async function proposeFromAgent(
     proposalDefinition: definition,
     proposalAddedAgentHeads: addedAgentHeads,
   }))
-  const result = await swarm.runAgentTurn({ agentId, inputEventId: input.id })
+  const result = await swarm.runAgentTurn({ agentId, inputEventIds: [input.id] })
   const event = swarm.ledger.all().findLast((candidate) =>
     candidate.type === "swarm.revision.proposed" && candidate.causation.includes(result.turnEvent.id),
   )
@@ -203,10 +203,25 @@ export interface RecordedRun {
   forkSession: boolean
 }
 
+interface Gate {
+  promise: Promise<void>
+  resolve(): void
+}
+
 class ScriptedHarnessAdapter implements HarnessAdapter {
   readonly id = "scripted"
   readonly runs: RecordedRun[] = []
+  #blocked = new Map<string, Gate[]>()
   #sessions = 0
+
+  blockNext(agentId: string): () => void {
+    let release = () => {}
+    const gate = { promise: new Promise<void>((resolve) => { release = resolve }), resolve: () => release() }
+    const blocked = this.#blocked.get(agentId) ?? []
+    blocked.push(gate)
+    this.#blocked.set(agentId, blocked)
+    return gate.resolve
+  }
 
   async run(input: HarnessInput): Promise<HarnessResult> {
     const { turnId, workingDirectory, context, commands, pluginWorkspaces, peerWorkspaces } = input
@@ -232,6 +247,8 @@ class ScriptedHarnessAdapter implements HarnessAdapter {
       ...(input.checkpoint ? { checkpoint: input.checkpoint } : {}),
       forkSession: input.forkSession,
     })
+    const gate = this.#blocked.get(agentId)?.shift()
+    if (gate) await gate.promise
     if (data.command === "improve-plugin") {
       const plugin = pluginWorkspaces.find((workspace) => workspace.id === data.pluginId)
       if (!plugin?.writable) throw new Error(`Plugin workspace is not writable: ${data.pluginId}`)

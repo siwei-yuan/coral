@@ -4,7 +4,7 @@ import type { Swarm } from "../../core/swarm/runtime.ts"
 import type { ForkSnapshot, SwarmRevision } from "../../core/swarm/revision.ts"
 import type { ViewExtension, ViewExtensionLink } from "../extension.ts"
 import { projectLedger, type DefaultViewModel } from "./project.ts"
-import { renderDefaultView, renderExtensionPage } from "./render.ts"
+import { renderDefaultView, renderExtensionPage, renderTopologySection } from "./render.ts"
 
 export class DefaultView {
   readonly swarm: Swarm
@@ -60,9 +60,24 @@ export class DefaultView {
 
   async #handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
     try {
-      const path = new URL(request.url ?? "/", "http://localhost").pathname
+      const url = new URL(request.url ?? "/", "http://localhost")
+      const path = url.pathname
       const extensionRoute = extensionPath(path)
       if (request.method === "GET" && path === "/") return html(response, 200, this.render())
+      if (request.method === "GET" && path === "/_view/topology") {
+        const model = this.model()
+        const head = model.events.at(-1)?.seq ?? 0
+        if (head <= Number(url.searchParams.get("after") ?? -1)) {
+          response.writeHead(204, { "cache-control": "no-store" }).end()
+          return
+        }
+        response.writeHead(200, {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+          "content-security-policy": "default-src 'none'",
+        }).end(renderTopologySection(model))
+        return
+      }
       if (request.method === "GET" && extensionRoute?.action === null) {
         const extension = this.#extension(extensionRoute.plugin)
         return html(
@@ -70,6 +85,19 @@ export class DefaultView {
           200,
           renderExtensionPage(this.#link(extension), await extension.render(), this.#links()),
         )
+      }
+      if (request.method === "GET" && extensionRoute?.action) {
+        const extension = this.#extension(extensionRoute.plugin)
+        if (!extension.read) throw new Error(`View extension has no readable resources: ${extension.plugin}`)
+        const result = await extension.read(extensionRoute.action, url.searchParams, {
+          events: this.swarm.ledger.all().filter((event) => event.actor === `plugin/${extension.plugin}`),
+        })
+        response.writeHead(200, {
+          "content-type": result.contentType,
+          "cache-control": "no-store",
+          "content-security-policy": "default-src 'none'",
+        }).end(result.body)
+        return
       }
       if (request.method !== "POST") return html(response, 404, this.render("Page not found"))
       const form = await readForm(request)
@@ -151,7 +179,7 @@ function frontier(form: URLSearchParams): number {
 }
 
 function html(response: ServerResponse, status: number, body: string): void {
-  response.writeHead(status, { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; form-action 'self'" }).end(body)
+  response.writeHead(status, { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'none'; img-src 'self' data:; connect-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; form-action 'self'" }).end(body)
 }
 
 function extensionPath(path: string): { plugin: string; action: string | null } | null {

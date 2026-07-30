@@ -41,6 +41,7 @@ export interface AgentSwarmView {
   agents: Array<{
     id: string
     self: boolean
+    turnPolicy: AgentDefinition["turnPolicy"]
     receives: string[]
     sendsTo: string[]
     receivesFromPlugins: string[]
@@ -67,7 +68,9 @@ export function validateDefinition(definition: unknown): SwarmDefinition {
   })
   const ids = new Set<string>()
   for (const agent of copy.agents) {
-    if (!agent.id || !agent.harness) throw new Error("Every Agent requires id and harness")
+    if (!agent.id || !agent.harness || !["single-event", "batch-events"].includes(agent.turnPolicy)) {
+      throw new Error("Every Agent requires id, harness, and turnPolicy")
+    }
     if (ids.has(agent.id)) throw new Error(`duplicate Agent: ${agent.id}`)
     ids.add(agent.id)
   }
@@ -130,6 +133,7 @@ export function projectAgentSwarmView(
     agents: definition.agents.map((agent) => ({
       id: agent.id,
       self: agent.id === self,
+      turnPolicy: agent.turnPolicy,
       receives: definition.routes.filter((route) => route.to === agent.id).map((route) => route.from),
       sendsTo: definition.routes.filter((route) => route.from === agent.id).map((route) => route.to),
       receivesFromPlugins: definition.pluginIngress

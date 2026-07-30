@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto"
 const [command, ...args] = process.argv.slice(2)
 
 if (!command || command === "--help" || command === "help") {
-  process.stdout.write("chat reply --conversation <id> --to <external recipient> --text <text> --caused-by <event id>\n")
+  process.stdout.write("chat reply --conversation <id> --to <external recipient> --caused-by <event id> < message.txt\n")
   process.exit(0)
 }
 
@@ -14,10 +14,16 @@ if (command !== "reply") fail(`unknown command: ${command}`)
 const stateRoot = process.env.CORALLUM_PLUGIN_STATE
 if (!stateRoot) fail("CORALLUM_PLUGIN_STATE is required")
 
+process.stdin.setEncoding("utf8")
+let text = ""
+for await (const chunk of process.stdin) text += chunk
+text = text.replaceAll("\r\n", "\n").trimEnd()
+if (!text.trim()) fail("reply text is required on stdin")
+
 const reply = {
   conversationId: option(args, "--conversation"),
   to: option(args, "--to"),
-  text: option(args, "--text"),
+  text,
   causedBy: option(args, "--caused-by"),
   queuedAt: new Date().toISOString(),
 }

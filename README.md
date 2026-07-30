@@ -86,6 +86,11 @@ Definition declares allowed Agent-to-Agent edges; Main and Forks validate those
 edges and deliver each message to its recipients. Agents see the current Agent
 set and communication graph in their runtime Swarm view.
 
+Every Agent has an independent Event queue and one required `turnPolicy`.
+`single-event` starts one turn per queued Event; `batch-events` gives the next
+turn every Event waiting for that Agent. Different Agents run independently.
+Queue state is operational and never creates Ledger Events.
+
 Each Plugin binding pins one exact Git commit, names one shell command, and
 declares the Agents allowed to call it. On Main, an authorized Agent receives
 the CLI from the active pin plus its editable Plugin draft workspace. The draft
@@ -189,10 +194,11 @@ next control node. A second sector projects Agent routes and Plugin access
 directly from the active Definition beside a time-filtered Event Ledger; replay
 animates routing along those existing topology edges. A Plugin may optionally
 provide a View-only extension.
-The pinned Chat Plugin adds a conversation surface and the pinned Screen Plugin
-renders a compressed preview beside OCR and foreground App session metadata;
-its CLI also exposes the full-resolution image. Extensions add UI only and
-receive no Revision decision authority.
+The Chat Plugin adds a live conversation surface with multiline replies. The
+Screen Plugin pages retained captures in batches of 20, lazy-loads
+their previews, and opens OCR, App session metadata, and the referenced Ledger
+Event on demand; its CLI also exposes the full-resolution image. Extensions add
+UI only and receive no Revision decision authority.
 
 Screen capture is event-driven and macOS-local. Its Event carries only an
 activity ID; authorized Agents call `screen activity <id>` to load OCR and

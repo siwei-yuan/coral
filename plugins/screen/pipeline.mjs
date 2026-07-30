@@ -174,23 +174,31 @@ export class ScreenPipeline {
   }
 }
 
-export async function readCurrent(stateRoot) {
-  try {
-    const { activityId } = JSON.parse(await readFile(join(stateRoot, "current.json"), "utf8"))
-    if (!activityId) return null
-    const root = join(stateRoot, "activities", activityId)
-    const value = JSON.parse(await readFile(join(root, "activity.json"), "utf8"))
-    return {
-      ...value,
-      captures: value.captures.map((item) => ({
-        ...item,
-        image: join(root, item.image),
-        preview: join(root, item.preview),
-      })),
-    }
-  } catch (error) {
-    if (error?.code === "ENOENT") return null
-    throw error
+export async function readCaptures(stateRoot, before, limit = 20) {
+  const captures = await allCaptures(stateRoot)
+  const cursorIndex = before ? captures.findIndex((capture) => capture.cursor === before) : -1
+  if (before && cursorIndex < 0) throw new Error("Unknown Screen history cursor")
+  const start = cursorIndex + 1
+  const page = captures.slice(start, start + limit)
+  return {
+    items: page.map(({ image: _image, preview: _preview, ocr: _ocr, cursor: _cursor, ...capture }) => capture),
+    nextCursor: captures[start + limit] ? page.at(-1)?.cursor ?? null : null,
+  }
+}
+
+export async function readCapture(stateRoot, activityId, captureId) {
+  assertId(activityId)
+  assertId(captureId)
+  const root = join(stateRoot, "activities", activityId)
+  const activity = JSON.parse(await readFile(join(root, "activity.json"), "utf8"))
+  const capture = activity.captures.find((item) => item.id === captureId)
+  if (!capture) throw new Error(`Unknown Screen capture: ${captureId}`)
+  return {
+    activityId,
+    app: activity.app,
+    ...capture,
+    image: join(root, capture.image),
+    preview: join(root, capture.preview),
   }
 }
 
@@ -248,4 +256,27 @@ async function directorySize(root) {
     bytes += entry.isDirectory() ? await directorySize(path) : (await stat(path)).size
   }
   return bytes
+}
+
+async function allCaptures(stateRoot) {
+  const root = join(stateRoot, "activities")
+  const captures = []
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    const activityRoot = join(root, entry.name)
+    const activity = JSON.parse(await readFile(join(activityRoot, "activity.json"), "utf8"))
+    for (const capture of activity.captures) captures.push({
+      activityId: activity.id,
+      app: activity.app,
+      ...capture,
+      image: join(activityRoot, capture.image),
+      preview: join(activityRoot, capture.preview),
+      cursor: `${capture.capturedAt}|${capture.id}`,
+    })
+  }
+  return captures.sort((left, right) => right.cursor.localeCompare(left.cursor))
+}
+
+function assertId(value) {
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) throw new Error("Invalid Screen activity or capture ID")
 }

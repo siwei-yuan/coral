@@ -9,7 +9,7 @@ test("a Proposal may add an Agent only with an initialized workspace", async (t)
     workspaceSeed("Audit completed work and report evidence."),
   )
   const proposed = structuredClone(definition)
-  proposed.agents.push({ id: "auditor", harness: "scripted" })
+  proposed.agents.push({ id: "auditor", harness: "scripted", turnPolicy: "single-event" })
   proposed.routes.push({ from: "builder", to: "auditor" })
   proposed.tests.push({
     id: "auditor-runs",
@@ -59,7 +59,7 @@ test("a Proposal may remove an Agent without deleting its auditable history", as
   const improvement = swarm.appendInput(userMessage("reviewer", "improve reviewer before removal", {
     command: "improve-agent",
   }))
-  await swarm.runAgentTurn({ agentId: "reviewer", inputEventId: improvement.id })
+  await swarm.runAgentTurn({ agentId: "reviewer", inputEventIds: [improvement.id] })
   const invalid = structuredClone(definition)
   invalid.agents = invalid.agents.filter((agent) => agent.id !== "reviewer")
   await assert.rejects(

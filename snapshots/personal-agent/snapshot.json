@@ -4,10 +4,10 @@
   "description": "A four-Agent personal Swarm that learns the user, builds memory, anticipates next steps, and audits itself.",
   "definition": {
     "agents": [
-      { "id": "chat-agent", "harness": "codex" },
-      { "id": "memory-builder", "harness": "codex" },
-      { "id": "proactivity", "harness": "codex" },
-      { "id": "auditor", "harness": "codex" }
+      { "id": "chat-agent", "harness": "codex", "turnPolicy": "batch-events" },
+      { "id": "memory-builder", "harness": "codex", "turnPolicy": "batch-events" },
+      { "id": "proactivity", "harness": "codex", "turnPolicy": "batch-events" },
+      { "id": "auditor", "harness": "codex", "turnPolicy": "batch-events" }
     ],
     "routes": [
       { "from": "chat-agent", "to": "memory-builder" },

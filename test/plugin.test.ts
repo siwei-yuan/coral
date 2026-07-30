@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { execFile } from "node:child_process"
+import { execFile, spawn } from "node:child_process"
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -24,15 +24,15 @@ test("Chat runtime emits user Communication and its Agent CLI writes replies out
   assert.equal(emitted[0]?.type, "communication.sent")
   assert.equal((emitted[0]?.data as { source: { plugin: string } }).source.plugin, "chat")
 
-  await execute(
+  await executeWithInput(
     join(process.cwd(), "plugins/chat/bin/chat.mjs"),
     [
       "reply",
       "--conversation", "conversation-1",
       "--to", "external/user/local",
-      "--text", "hi",
       "--caused-by", "event-1",
     ],
+    "First paragraph.\n\nSecond paragraph.\n",
     { env: { ...process.env, CORALLUM_PLUGIN_STATE: root } },
   )
   const [replyFile] = await readdir(join(root, "outbox"))
@@ -40,7 +40,7 @@ test("Chat runtime emits user Communication and its Agent CLI writes replies out
     text: string
     causedBy: string
   }
-  assert.equal(reply.text, "hi")
+  assert.equal(reply.text, "First paragraph.\n\nSecond paragraph.")
   assert.equal(reply.causedBy, "event-1")
   await runtime.stop()
 })
@@ -138,6 +138,31 @@ test("Screen pipeline coalesces capture signals, persists an Activity, then emit
   await pipeline.stop()
 })
 
+test("Screen history returns newest captures in batches of 20", async (t) => {
+  const root = await temporary(t, "screen-history")
+  const activities = join(root, "activities")
+  await mkdir(activities, { recursive: true })
+  for (let index = 0; index < 21; index += 1) {
+    const id = `activity_${index}`
+    const directory = join(activities, id)
+    await mkdir(directory)
+    await writeFile(join(directory, "activity.json"), JSON.stringify({
+      id,
+      app: { name: "Codex" },
+      captures: [{ id: `capture_${index}`, capturedAt: new Date(index * 1_000).toISOString(), image: "image.png", preview: "preview.jpg", ocr: String(index) }],
+    }))
+  }
+  const { readCaptures } = await import(pathToFileURL(join(process.cwd(), "plugins/screen/pipeline.mjs")).href) as {
+    readCaptures(root: string, before?: string): Promise<{ items: Array<{ id: string }>; nextCursor: string | null }>
+  }
+  const first = await readCaptures(root)
+  const second = await readCaptures(root, first.nextCursor!)
+  assert.equal(first.items.length, 20)
+  assert.equal(first.items[0]?.id, "capture_20")
+  assert.deepEqual(second.items.map((capture) => capture.id), ["capture_0"])
+  assert.equal(second.nextCursor, null)
+})
+
 test("Scheduler CLI owns recurring notes and its runtime emits due Communication", async (t) => {
   const root = await temporary(t, "scheduler")
   const emitted: PluginIngressDraft[] = []
@@ -212,6 +237,23 @@ async function waitFor(condition: () => boolean): Promise<void> {
     if (Date.now() >= deadline) throw new Error("Timed out waiting for Plugin runtime")
     await new Promise((resolve) => setTimeout(resolve, 5))
   }
+}
+
+function executeWithInput(
+  file: string,
+  args: string[],
+  input: string,
+  options: { env: NodeJS.ProcessEnv },
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(file, args, { ...options, stdio: ["pipe", "ignore", "pipe"] })
+    let error = ""
+    child.stderr.setEncoding("utf8")
+    child.stderr.on("data", (chunk) => { error += chunk })
+    child.once("error", reject)
+    child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(error || `Chat CLI exited ${code}`)))
+    child.stdin.end(input)
+  })
 }
 
 async function temporary(t: test.TestContext, name: string): Promise<string> {

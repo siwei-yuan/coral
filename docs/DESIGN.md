@@ -20,8 +20,8 @@ Agent owns a Git workspace through which it controls context, instructions,
 memory, skills, code, and tests. Swarm composes Agents, routing, pinned tests,
 Plugins, Proposals, Forks, Human Decisions, and activation.
 
-An Agent entry in `SwarmDefinition` declares only Swarm-level binding such as
-identity and Harness. The Agent's responsibility, instructions, and initial
+An Agent entry in `SwarmDefinition` declares only Swarm-level binding: identity,
+Harness, and turn policy. The Agent's responsibility, instructions, and initial
 context live in its seed workspace, normally in `AGENTS.md` and `context/`.
 This keeps every part of the Agent's editable self in the same Git history.
 
@@ -149,6 +149,12 @@ the active edge, records `communication.sent`, and performs delivery. Main and
 Forks use the same rule. Arbitrary application Event types are not part of this
 Core graph.
 
+Each Agent has one in-memory Event queue and at most one running turn. Routing
+to one Agent never waits for another Agent. `single-event` consumes one queued
+Event per turn; `batch-events` consumes every Event waiting when the next turn
+starts. Queue operations are runtime state, not Ledger Events. The resulting
+`agent.turn.recorded` Event references every input Event consumed by that turn.
+
 Adding or removing an Agent means proposing another complete Definition:
 
 - A new Agent must have an independently initialized workspace commit and an
@@ -182,6 +188,12 @@ there is no evaluation Event or Candidate state. A Human approves or denies an
 exact Fork frontier. Approval atomically snapshots that Fork as a new Revision
 and promotes it as the only Main. Denial records the Decision and preserves the
 Fork as audit history without creating a Revision.
+
+Activation briefly stops new Main turns and waits only for turns already in
+progress. It does not drain pending queues. Queued Events for retained Agents
+continue against the activated Main; activation refuses to remove an Agent
+while that Agent still has pending Events. A Proposal alone neither pauses Main
+nor captures operational queues.
 
 Main may continue to receive Agent workspace commits after the Proposal was
 created. At promotion, those Proposal-later commit tails are continued after
@@ -290,7 +302,9 @@ CLI calls are Harness operations, not Ledger Events. Plugin Events are inbound:
 Chat turns user input into a Communication Event, while Screen
 announces a new activity and lets the Agent query its raw image, OCR, and
 foreground App session through the `screen` CLI. Agent output takes the reverse
-path directly through a Plugin CLI and the Plugin-owned runtime. It does not
+path directly through a Plugin CLI and the Plugin-owned runtime. Chat reply
+bodies arrive on stdin so multiline text does not depend on shell argument
+escaping. Agent output does not
 become an outbound Ledger Event. No Plugin copies files into or initializes an
 Agent workspace.
 
@@ -366,11 +380,13 @@ decorative data.
 The default View understands Plugins only through their Definition and inbound
 Communication Events. It renders ingress routing and CLI exposure without any
 Chat- or Screen-specific branches. An active pinned Plugin runtime may return
-an optional `ViewExtension`. The extension owns only its page and actions: Chat
-adds a message surface backed by its Plugin store; Screen renders its current
-activity artifacts. The extension code evolves with the Plugin commit but is
-not separately declared in `SwarmDefinition` and is never given Fork, approve,
-or deny authority.
+an optional `ViewExtension`. The extension owns only its page, read-only
+resources, its own Plugin-authored Events, and actions. Chat adds a live message
+surface backed by its Plugin store. Screen pages retained capture metadata,
+lazy-loads previews, and resolves
+OCR plus the referenced Ledger Event only when a Human opens a capture. The
+extension code evolves with the Plugin commit but is not separately declared in
+`SwarmDefinition` and is never given Fork, approve, or deny authority.
 
 The Ledger is the control-plane source of truth, not a container for all raw
 bytes. A View follows Ledger references to Git for workspace files, Harness
