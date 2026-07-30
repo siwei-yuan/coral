@@ -47,17 +47,11 @@ export type { PluginIngressDraft } from "./deployment/plugin-runtime.ts"
 export { DefaultView, projectLedger, renderDefaultView, renderExtensionPage } from "./view/default/index.ts"
 export type { ViewExtension, ViewExtensionLink } from "./view/extension.ts"
 export type {
-  AgentCheckpointView,
-  AgentStateView,
   DefaultViewModel,
-  EventReferenceView,
   EvolutionNodeView,
   DefaultViewServer,
   ForkTestView,
   ForkView,
-  PluginEventView,
-  PluginView,
   ProposalView,
   RevisionView,
-  TurnView,
 } from "./view/default/index.ts"

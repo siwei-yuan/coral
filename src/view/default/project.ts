@@ -48,41 +48,6 @@ export interface ForkView {
   seq: number
 }
 
-export interface PluginEventView {
-  seq: number
-  type: string
-  actor: string
-  recipients: string[]
-  scope: "main" | string
-}
-
-export interface PluginView {
-  id: string
-  command: string
-  mode: string
-  activeCommit: string
-  draftCommit: string
-  exposedTo: string[]
-  ingressTargets: string[]
-  events: PluginEventView[]
-}
-
-export interface AgentCheckpointView {
-  harness: string
-  sessionId: string
-  turnId: string
-  outcome: string
-  pendingFork: boolean
-}
-
-export interface AgentStateView {
-  id: string
-  harness: string
-  workspaceHead: string
-  evolved: boolean
-  checkpoint: AgentCheckpointView | null
-}
-
 export interface EvolutionNodeView {
   id: string
   eventId: string
@@ -96,32 +61,12 @@ export interface EvolutionNodeView {
   sourceId?: string
 }
 
-export interface EventReferenceView {
-  id: string
-  type: string
-}
-
-export interface TurnView {
-  id: string
-  seq: number
-  agentId: string
-  scope: string
-  outcome: string
-  inputs: EventReferenceView[]
-  outputs: EventReferenceView[]
-  checkpoint: { harness: string; sessionId: string; turnId: string } | null
-}
-
 export interface DefaultViewModel {
   activeRevision: RevisionView | null
-  activeWorkspaceHeads: Record<string, string>
-  agents: AgentStateView[]
   evolution: EvolutionNodeView[]
-  turns: TurnView[]
   revisions: RevisionView[]
   proposals: ProposalView[]
   forks: ForkView[]
-  plugins: PluginView[]
   events: LedgerEvent[]
 }
 
@@ -205,40 +150,12 @@ export function projectLedger(events: LedgerEvent[]): DefaultViewModel {
     }]
   })
 
-  const plugins = activeRevision?.definition.plugins.map((binding): PluginView => ({
-    id: binding.id,
-    command: binding.command,
-    mode: binding.mode,
-    activeCommit: binding.commit,
-    draftCommit: pluginDraftCommit(ordered, binding.id, binding.commit),
-    exposedTo: binding.exposedTo,
-    ingressTargets: activeRevision.definition.pluginIngress
-      .filter((item) => item.plugin === binding.id)
-      .map((item) => item.ingressTo),
-    events: ordered.flatMap((event): PluginEventView[] => {
-      if (!isPluginEvent(event, binding.id)) return []
-      const data = event.data as { to?: unknown }
-      return [{
-        seq: event.seq,
-        type: event.type,
-        actor: event.actor,
-        recipients: Array.isArray(data.to) ? data.to.filter((item): item is string => typeof item === "string") : [],
-        scope: event.scope.kind === "active" ? "main" : event.scope.forkId,
-      }]
-    }),
-  })) ?? []
-
-  const activeWorkspaceHeads = activeRevision ? activeHeads(activeRevision, ordered) : {}
   return {
     activeRevision,
-    activeWorkspaceHeads,
-    agents: activeRevision ? projectAgents(activeRevision, activeWorkspaceHeads, ordered) : [],
     evolution: projectEvolution(revisions, proposals, forks, ordered),
-    turns: projectTurns(ordered),
     revisions,
     proposals,
     forks,
-    plugins,
     events: ordered,
   }
 }
@@ -314,134 +231,6 @@ function projectEvolution(
   return nodes.sort((left, right) => left.seq - right.seq)
 }
 
-function projectAgents(
-  revision: RevisionView,
-  heads: Record<string, string>,
-  events: LedgerEvent[],
-): AgentStateView[] {
-  const latestProposal = events.findLast((event) => event.scope.kind === "active" && event.type === "swarm.revision.proposed")
-  return revision.definition.agents.map((agent) => {
-    const activeTurn = events.findLast((event) =>
-      event.seq > revision.seq && event.scope.kind === "active" && isAgentTurn(event, agent.id),
-    )
-    const sourceTurn = !activeTurn && revision.sourceForkId
-      ? turnForFork(revision.sourceForkId, agent.id, events)
-      : undefined
-    const turn = activeTurn ?? sourceTurn
-    const data = turn?.data as {
-      inputWorkspaceCommit?: unknown
-      outcome?: unknown
-      trajectory?: { harness?: unknown; sessionId?: unknown; turnId?: unknown }
-    } | undefined
-    const trajectory = data?.trajectory
-    const workspaceHead = heads[agent.id]!
-    const checkpoint = turn && isTrajectory(trajectory) ? {
-      harness: trajectory.harness,
-      sessionId: trajectory.sessionId,
-      turnId: trajectory.turnId,
-      outcome: typeof data?.outcome === "string" ? data.outcome : "unknown",
-      pendingFork: data?.inputWorkspaceCommit !== workspaceHead ||
-        turn.seq < revision.seq || Boolean(latestProposal && latestProposal.seq > turn.seq),
-    } : null
-    return {
-      id: agent.id,
-      harness: agent.harness,
-      workspaceHead,
-      evolved: workspaceHead !== revision.agentHeads[agent.id],
-      checkpoint,
-    }
-  })
-}
-
-function turnForFork(forkId: string, agentId: string, events: LedgerEvent[]): LedgerEvent | undefined {
-  const ownTurn = events.findLast((event) =>
-    event.scope.kind === "fork" && event.scope.forkId === forkId && isAgentTurn(event, agentId),
-  )
-  if (ownTurn) return ownTurn
-  const created = eventForFork(events, forkId)
-  const source = created?.data as {
-    sourceKind?: unknown
-    sourceId?: unknown
-    sourceFrontier?: unknown
-  } | undefined
-  if (source?.sourceKind === "proposal" && typeof source.sourceFrontier === "number") {
-    const frontier = source.sourceFrontier
-    return events.findLast((event) =>
-      event.seq <= frontier && event.scope.kind === "active" && isAgentTurn(event, agentId),
-    )
-  }
-  if (source?.sourceKind !== "revision" || typeof source.sourceId !== "string") return undefined
-  const activation = events.find((event) => {
-    if (event.type !== "swarm.revision.activated") return false
-    return (event.data as { revision?: { id?: unknown } }).revision?.id === source.sourceId
-  })
-  const sourceForkId = (activation?.data as { revision?: { sourceForkId?: unknown } } | undefined)?.revision?.sourceForkId
-  if (typeof sourceForkId === "string") return turnForFork(sourceForkId, agentId, events)
-  return events.findLast((event) =>
-    event.seq <= (activation?.seq ?? 0) && event.scope.kind === "active" && isAgentTurn(event, agentId),
-  )
-}
-
-function projectTurns(events: LedgerEvent[]): TurnView[] {
-  const byId = new Map(events.map((event) => [event.id, event]))
-  return events.flatMap((event): TurnView[] => {
-    if (event.type !== "agent.turn.recorded") return []
-    const data = event.data as {
-      turnId?: unknown
-      agentId?: unknown
-      inputEventIds?: unknown
-      outcome?: unknown
-      trajectory?: { harness?: unknown; sessionId?: unknown; turnId?: unknown }
-    }
-    if (typeof data.agentId !== "string") return []
-    const inputIds = Array.isArray(data.inputEventIds)
-      ? data.inputEventIds.filter((id): id is string => typeof id === "string")
-      : []
-    const related = events.filter((candidate) => {
-      if (candidate.causation.includes(event.id)) return true
-      if (candidate.type !== "agent.workspace.committed" && candidate.type !== "plugin.workspace.committed") return false
-      return typeof data.turnId === "string" && (candidate.data as { turnId?: unknown }).turnId === data.turnId
-    })
-    return [{
-      id: event.id,
-      seq: event.seq,
-      agentId: data.agentId,
-      scope: event.scope.kind === "active" ? "Main" : event.scope.forkId,
-      outcome: typeof data.outcome === "string" ? data.outcome : "unknown",
-      inputs: inputIds.map((id) => ({ id, type: byId.get(id)?.type ?? "unknown" })),
-      outputs: related.map((item) => ({ id: item.id, type: item.type })),
-      checkpoint: isTrajectory(data.trajectory) ? data.trajectory : null,
-    }]
-  })
-}
-
-function pluginDraftCommit(events: LedgerEvent[], pluginId: string, fallback: string): string {
-  for (const event of [...events].reverse()) {
-    if (
-      event.scope.kind !== "active" ||
-      (event.type !== "plugin.workspace.initialized" && event.type !== "plugin.workspace.committed")
-    ) continue
-    const data = event.data as { pluginId?: unknown; commit?: unknown; importedHead?: unknown }
-    if (data.pluginId !== pluginId) continue
-    if (typeof data.importedHead === "string") return data.importedHead
-    if (typeof data.commit === "string") return data.commit
-  }
-  return fallback
-}
-
-function activeHeads(revision: RevisionView, events: LedgerEvent[]): Record<string, string> {
-  const activation = events.find((event) => event.id === revision.eventId)
-  const data = activation?.data as { workspaceHeads?: Record<string, string> } | undefined
-  const heads = { ...(data?.workspaceHeads ?? revision.agentHeads) }
-  for (const event of events) {
-    if (event.seq <= revision.seq || event.scope.kind !== "active") continue
-    if (event.type !== "agent.workspace.committed" && event.type !== "agent.workspace.reapplied") continue
-    const commit = event.data as { agentId?: string; commit?: string }
-    if (commit.agentId && commit.commit && commit.agentId in heads) heads[commit.agentId] = commit.commit
-  }
-  return heads
-}
-
 function projectTests(definition: SwarmDefinition, events: LedgerEvent[]): ForkTestView[] {
   return definition.tests.map((test) => {
     const roots = events.filter((event) => event.actor === `test/${test.id}`)
@@ -454,24 +243,6 @@ function projectTests(definition: SwarmDefinition, events: LedgerEvent[]): ForkT
     )
     return { id: test.id, passed: evidence.length > 0, evidenceEventIds: evidence.map((event) => event.id) }
   })
-}
-
-function isPluginEvent(event: LedgerEvent, pluginId: string): boolean {
-  if (event.type !== "communication.sent" || !event.data || typeof event.data !== "object") return false
-  const data = event.data as { source?: { plugin?: unknown } }
-  return event.actor === `plugin/${pluginId}` || data.source?.plugin === pluginId
-}
-
-function isAgentTurn(event: LedgerEvent, agentId: string): boolean {
-  return event.type === "agent.turn.recorded" && (event.data as { agentId?: unknown }).agentId === agentId
-}
-
-function isTrajectory(value: unknown): value is { harness: string; sessionId: string; turnId: string } {
-  if (!value || typeof value !== "object") return false
-  const trajectory = value as { harness?: unknown; sessionId?: unknown; turnId?: unknown }
-  return typeof trajectory.harness === "string" &&
-    typeof trajectory.sessionId === "string" &&
-    typeof trajectory.turnId === "string"
 }
 
 function decisionForFork(events: LedgerEvent[], forkId: string): LedgerEvent | undefined {

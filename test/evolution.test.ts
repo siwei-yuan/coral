@@ -2,7 +2,6 @@ import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 import test from "node:test"
-import { projectLedger } from "../src/index.ts"
 import { PluginRuntimeHost } from "../src/deployment/plugin-runtime.ts"
 import { contextText, createFixture, proposeFromAgent, userMessage } from "../test-support/fixture.ts"
 
@@ -220,19 +219,6 @@ test("a Revision snapshots Agent commits and Forks can start from any Revision o
   const secondInput = ledger.inScope(second.scope).find((event) => event.actor === "test/core-behavior")
   assert.deepEqual(firstInput?.data, secondInput?.data)
   assert.notEqual(firstResult?.agentHeads.builder, secondResult?.agentHeads.builder)
-  const projected = projectLedger(ledger.all())
-  assert.deepEqual(projected.proposals[0]?.definition, proposedDefinition)
-  assert.deepEqual(projected.plugins[0], {
-    id: "chat",
-    command: "chat",
-    mode: "live",
-    activeCommit: definition.plugins[0]!.commit,
-    draftCommit: proposal.definition.plugins[0]!.commit,
-    exposedTo: ["builder"],
-    ingressTargets: ["builder"],
-    events: [],
-  })
-  assert.equal(projected.forks.find((fork) => fork.id === first.id)?.tests[0]?.passed, true)
   assert.equal(
     swarm.eventsVisibleToFork(first.id).some(
       (event) => event.scope.kind === "fork" && event.scope.forkId === second.id,

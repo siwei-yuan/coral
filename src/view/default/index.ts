@@ -124,18 +124,12 @@ export interface DefaultViewServer {
 
 export { projectLedger, renderDefaultView, renderExtensionPage }
 export type {
-  AgentCheckpointView,
-  AgentStateView,
   DefaultViewModel,
-  EventReferenceView,
   EvolutionNodeView,
   ForkTestView,
   ForkView,
-  PluginEventView,
-  PluginView,
   ProposalView,
   RevisionView,
-  TurnView,
 } from "./project.ts"
 
 async function readForm(request: IncomingMessage): Promise<URLSearchParams> {
