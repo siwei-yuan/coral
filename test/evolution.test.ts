@@ -20,7 +20,7 @@ test("a workspace commit immediately changes the Agent's next turn without a Swa
   assert.equal(swarm.agentHead("builder"), second.workspaceCommit.commit)
   assert.equal(swarm.activeRevision().id, revision.id)
   assert.equal(swarm.activeRevision().agentHeads.builder, initial.commit)
-  assert.equal(first.workspaceEvent?.type, "agent.workspace.committed")
+  assert.equal(first.workspaceEvents[0]?.type, "agent.workspace.committed")
   assert.equal(first.turnEvent.type, "agent.turn.recorded")
   const turnData = first.turnEvent.data as { inputWorkspaceCommit: string; workspaceCommit: string }
   assert.equal(turnData.inputWorkspaceCommit, initial.commit)
@@ -37,6 +37,36 @@ test("a workspace commit immediately changes the Agent's next turn without a Swa
   assert.doesNotMatch(await workspaces.read("builder", initial.commit, "AGENTS.md"), /Evolved responsibility/)
   assert.equal(ledger.all().some((event) => event.type === "swarm.revision.proposed"), false)
   assert.equal(ledger.verify(), true)
+})
+
+test("a turn records Agent-authored commits and restores uncommitted changes", async (t) => {
+  const { swarm, ledger, initial } = await createFixture(t)
+  const committed = swarm.appendInput(userMessage("builder", "record two durable learnings", {
+    command: "two-agent-commits",
+  }))
+  const result = await swarm.runAgentTurn({ agentId: "builder", inputEventId: committed.id })
+
+  assert.equal(result.workspaceEvents.length, 2)
+  assert.deepEqual(
+    result.workspaceEvents.map((event) => (event.data as { message: string }).message),
+    ["Record the first learning", "Record the second learning"],
+  )
+  assert.equal(
+    (result.workspaceEvents[1]!.data as { parentCommit: string }).parentCommit,
+    (result.workspaceEvents[0]!.data as { commit: string }).commit,
+  )
+  assert.equal(swarm.agentHead("builder"), result.workspaceCommit.commit)
+
+  const dirty = swarm.appendInput(userMessage("builder", "leave this uncommitted", { command: "leave-dirty" }))
+  const restored = await swarm.runAgentTurn({ agentId: "builder", inputEventId: dirty.id })
+  const turn = restored.turnEvent.data as { outcome: string; failure?: string }
+  assert.deepEqual(restored.workspaceEvents.map((event) => event.type), ["agent.workspace.restored"])
+  assert.equal(restored.workspaceCommit.commit, result.workspaceCommit.commit)
+  assert.equal(swarm.agentHead("builder"), result.workspaceCommit.commit)
+  assert.equal(turn.outcome, "completed")
+  assert.equal(turn.failure, undefined)
+  assert.equal(ledger.verify(), true)
+  assert.notEqual(result.workspaceCommit.commit, initial.commit)
 })
 
 test("Harness checkpoints resume until a workspace or Swarm snapshot boundary forks the session", async (t) => {

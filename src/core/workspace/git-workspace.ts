@@ -16,6 +16,17 @@ export interface WorkspaceCheckout {
   baseCommit: string
 }
 
+export interface CommittedWorkspaceChange extends WorkspaceCommit {
+  parentCommit: string
+  message: string
+}
+
+export interface WorkspaceCheckoutResult {
+  head: WorkspaceCommit
+  commits: CommittedWorkspaceChange[]
+  restored: boolean
+}
+
 export interface ReappliedWorkspaceCommit {
   sourceCommit: string
   appliedCommit: string
@@ -137,18 +148,38 @@ export class GitWorkspaceStore {
     return immutable({ workspaceId, repository, worktree, baseCommit: commit })
   }
 
-  async commit(checkout: WorkspaceCheckout, message: string, authoredBy: string): Promise<WorkspaceCommit> {
-    await git(checkout.worktree, ["add", "-A"])
-    const status = await git(checkout.worktree, ["status", "--porcelain"])
-    if (status.trim() === "") return this.resolveCommit(checkout.workspaceId, checkout.baseCommit)
+  async finalizeCheckout(checkout: WorkspaceCheckout): Promise<WorkspaceCheckoutResult> {
+    const restored = (await git(checkout.worktree, ["status", "--porcelain"])).trim() !== ""
+    if (restored) {
+      await git(checkout.worktree, ["reset", "--hard", "HEAD"])
+      await git(checkout.worktree, ["clean", "-fd"])
+    }
 
-    await git(checkout.worktree, ["commit", "-m", message], {
-      GIT_AUTHOR_NAME: `Agent ${authoredBy}`,
-      GIT_AUTHOR_EMAIL: `${authoredBy}@swarm.local`,
-      GIT_COMMITTER_NAME: `Agent ${authoredBy}`,
-      GIT_COMMITTER_EMAIL: `${authoredBy}@swarm.local`,
-    })
-    return this.resolveCommit(checkout.workspaceId, "HEAD", checkout.worktree)
+    const head = await this.resolveCommit(checkout.workspaceId, "HEAD", checkout.worktree)
+    if (head.commit === checkout.baseCommit) return immutable({ head, commits: [], restored })
+    if (!(await gitSucceeds(checkout.worktree, ["merge-base", "--is-ancestor", checkout.baseCommit, head.commit]))) {
+      throw new Error(`Workspace HEAD does not descend from its turn base: ${checkout.workspaceId}`)
+    }
+
+    const lines = (await git(checkout.worktree, [
+      "rev-list",
+      "--reverse",
+      "--parents",
+      `${checkout.baseCommit}..${head.commit}`,
+    ])).trim().split("\n").filter(Boolean)
+    const commits: CommittedWorkspaceChange[] = []
+    let parentCommit = checkout.baseCommit
+    for (const line of lines) {
+      const [commit, ...parents] = line.split(/\s+/)
+      if (!commit || parents.length !== 1 || parents[0] !== parentCommit) {
+        throw new Error(`Workspace commits must form a linear history: ${checkout.workspaceId}`)
+      }
+      const resolved = await this.resolveCommit(checkout.workspaceId, commit, checkout.worktree)
+      const message = (await git(checkout.worktree, ["show", "-s", "--format=%B", commit])).trimEnd()
+      commits.push(immutable({ ...resolved, parentCommit, message }))
+      parentCommit = commit
+    }
+    return immutable({ head, commits, restored })
   }
 
   async retain(workspaceId: string, key: string, commit: string): Promise<void> {

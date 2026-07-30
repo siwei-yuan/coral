@@ -19,6 +19,7 @@ import type {
   WorkspaceFiles,
   WorkspaceReapplyResult,
   WorkspaceCommit,
+  WorkspaceCheckoutResult,
 } from "../workspace/git-workspace.ts"
 import type { Ledger, LedgerEvent, Scope } from "../ledger/ledger.ts"
 import { activeScope } from "../ledger/ledger.ts"
@@ -49,7 +50,7 @@ export interface AgentTurnResult {
   pluginWorkspaceCommits: Record<string, WorkspaceCommit>
   actions: AgentAction[]
   checkpoint: HarnessCheckpoint | null
-  workspaceEvent: LedgerEvent | null
+  workspaceEvents: LedgerEvent[]
   pluginWorkspaceEvents: LedgerEvent[]
   turnEvent: LedgerEvent
 }
@@ -186,40 +187,81 @@ export class AgentRuntime {
         failure = error instanceof Error ? error.message : String(error)
       }
 
-      const workspaceCommit = await this.workspaces.commit(checkout, `Agent turn ${turnId}`, agent.id)
-      await this.workspaces.retain(agent.id, `turn/${turnId}`, workspaceCommit.commit)
+      let workspaceResult: WorkspaceCheckoutResult
+      const pluginResults = new Map<string, WorkspaceCheckoutResult>()
+      try {
+        workspaceResult = await this.workspaces.finalizeCheckout(checkout)
+        for (const plugin of openedPlugins) {
+          if (!plugin.draftCheckout) continue
+          pluginResults.set(
+            plugin.workspace.id,
+            await this.pluginWorkspaces!.finalizeCheckout(plugin.draftCheckout),
+          )
+        }
+      } catch (error) {
+        outcome = "failed"
+        failure = error instanceof Error ? error.message : String(error)
+        workspaceResult = {
+          head: await this.workspaces.resolveCommit(agent.id, baseCommit),
+          commits: [],
+          restored: false,
+        }
+        pluginResults.clear()
+      }
+
+      for (const change of workspaceResult.commits) {
+        await this.workspaces.retain(agent.id, `turn/${turnId}/${change.commit}`, change.commit)
+      }
+      const workspaceCommit = workspaceResult.head
 
       const pluginWorkspaceCommits: Record<string, WorkspaceCommit> = {}
       const pluginWorkspaceEvents: LedgerEvent[] = []
       for (const plugin of openedPlugins) {
         if (!plugin.draftCheckout) continue
-        const committed = await this.pluginWorkspaces!.commit(
+        const result = pluginResults.get(plugin.workspace.id)
+        if (!result) continue
+        const recorded = await this.pluginWorkspaces!.recordCheckoutResult(
           plugin.draftCheckout,
+          result,
           agent.id,
           turnId,
           inputEvents.map((event) => event.id),
         )
-        if (committed.event) {
-          pluginWorkspaceCommits[plugin.workspace.id] = committed.workspaceCommit
-          pluginWorkspaceEvents.push(committed.event)
+        if (result.commits.length > 0) {
+          pluginWorkspaceCommits[plugin.workspace.id] = recorded.workspaceCommit
         }
+        pluginWorkspaceEvents.push(...recorded.events)
       }
 
-      let workspaceEvent: LedgerEvent | null = null
-      if (workspaceCommit.commit !== baseCommit) {
-        workspaceEvent = this.ledger.append({
+      const workspaceEvents = workspaceResult.commits.map((change) =>
+        this.ledger.append({
           type: "agent.workspace.committed",
           actor: `agent/${agent.id}`,
           scope,
           causation: inputEvents.map((event) => event.id),
           data: {
             agentId: agent.id,
-            parentCommit: baseCommit,
-            commit: workspaceCommit.commit,
-            tree: workspaceCommit.tree,
+            parentCommit: change.parentCommit,
+            commit: change.commit,
+            tree: change.tree,
+            message: change.message,
             turnId,
           },
         })
+      )
+      if (workspaceResult.restored) {
+        workspaceEvents.push(this.ledger.append({
+          type: "agent.workspace.restored",
+          actor: "workspace/runtime",
+          scope,
+          causation: inputEvents.map((event) => event.id),
+          data: {
+            agentId: agent.id,
+            commit: workspaceResult.head.commit,
+            tree: workspaceResult.head.tree,
+            turnId,
+          },
+        }))
       }
 
       const turnEvent = this.ledger.append({
@@ -244,7 +286,7 @@ export class AgentRuntime {
         pluginWorkspaceCommits,
         actions,
         checkpoint: nextCheckpoint,
-        workspaceEvent,
+        workspaceEvents,
         pluginWorkspaceEvents,
         turnEvent,
       }

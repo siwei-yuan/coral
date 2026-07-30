@@ -77,6 +77,17 @@ read-only head of another current Agent's workspace and send suggestions using
 The Workspace store only knows Git commits and worktrees. It has no Swarm,
 Revision, Proposal, or Fork abstraction.
 
+The Agent owns edits, review, commits, and commit messages. The Driver owns the
+checkout, validates that the worktree is clean and that HEAD is a linear
+descendant of the turn's base, retains accepted commits, advances the Agent
+head, and records one `agent.workspace.committed` Event per commit. It never
+invents a commit on the Agent's behalf. A dirty worktree is restored to its
+current HEAD and records `agent.workspace.restored` without failing the turn;
+uncommitted changes never affect the Agent head. Writable Plugin draft
+workspaces use the same contract and `plugin.workspace.restored`; their accepted
+commits advance only the draft head until a Swarm Revision pins and activates
+one.
+
 Every workspace starts from exactly one root commit created by the Framework.
 That commit contains the initial Agent files and is recorded as
 `agent.workspace.initialized`; it is not attributed to an Agent turn. Bootstrap
@@ -194,11 +205,13 @@ The complete Core Event model and its only writers are:
 
 - `communication.sent`: Plugin/user ingress through Swarm, or an Agent `send`
   action materialized by Swarm after its turn.
-- `agent.workspace.initialized`, `agent.workspace.committed`, and
-  `agent.workspace.reapplied`: Workspace Runtime, Agent Runtime, and activation,
-  respectively.
-- `plugin.workspace.initialized` and `plugin.workspace.committed`: Plugin Git
-  evolution recorded by Plugin Workspace Runtime.
+- `agent.workspace.initialized`, `agent.workspace.committed`,
+  `agent.workspace.restored`, and `agent.workspace.reapplied`: Workspace
+  initialization, accepted Agent commits, discarded uncommitted changes, and
+  activation reapplication, respectively.
+- `plugin.workspace.initialized`, `plugin.workspace.committed`, and
+  `plugin.workspace.restored`: Plugin Git evolution and discarded uncommitted
+  changes recorded by Plugin Workspace Runtime.
 - `agent.turn.recorded`: one Core-recorded logical Harness turn and its exact
   trajectory checkpoint; it is never emitted by the Agent or Harness.
 - `swarm.revision.proposed`: Swarm materializes a validated complete Proposal

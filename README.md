@@ -13,7 +13,7 @@ The runtime has nine concepts:
 2. `GitWorkspaceStore` provides plain Git workspaces for Agent and Plugin code.
 3. `WorkspaceBridge` runs the Agent-owned `context.ts` from that workspace.
 4. `HarnessAdapter` drives a native Agent Harness.
-5. `AgentRuntime` records one logical turn and any resulting workspace commit.
+5. `AgentRuntime` records one logical turn and validates Agent-authored commits.
 6. `Swarm` snapshots Main as Revisions, creates isolated whole-Swarm Forks,
    and atomically promotes an exact Fork frontier after Human approval.
 7. Plugins own external runtimes and Git-backed code, expose shell CLIs to
@@ -116,10 +116,14 @@ from the new Definition and heads but never deletes its Git or Ledger history.
 
 An Agent uses `corallum send` for routed communication and `corallum propose`
 for a complete candidate Definition. These commands record private turn
-actions; after the Harness returns, Core commits workspace changes, validates
-the actions, and appends the authoritative Events. A Harness cannot emit
-arbitrary Ledger Events. Evaluation is a View projection over recorded facts,
-not a Core Event.
+actions. The Agent commits durable changes in its own workspace and explains
+why in each commit message. After the Harness returns, Core accepts only a
+clean, linear history from the turn's base, retains those commits, and appends
+one authoritative workspace Event per commit. Uncommitted changes are restored
+to the checkout's last commit and recorded as a workspace restoration Event;
+they do not fail the turn or affect its head. A Harness cannot emit arbitrary
+Ledger Events. Evaluation is a View projection over recorded facts, not a Core
+Event.
 
 See [docs/DESIGN.md](docs/DESIGN.md).
 

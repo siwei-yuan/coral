@@ -39,6 +39,15 @@ export function renderPrompt(input: HarnessInput): string {
     commands || "None",
     "# Read-only peer workspaces",
     peers || "None",
+    "# Workspace persistence",
+    [
+      "You are working in your own Git-backed workspace.",
+      "When a self-change should persist: modify the workspace, review the diff, and commit the intended change before ending the turn.",
+      "Use the commit message to explain what changed and why. If no durable self-change is warranted, do not commit.",
+      "Uncommitted changes are restored to the last commit at turn end and do not persist.",
+      "Writable Plugin workspaces follow the same rule. Do not edit read-only peer workspaces.",
+      "Do not rewrite history, switch branches, or modify Git internals. Corallum owns checkout, refs, integration, and Ledger recording.",
+    ].join("\n"),
     "Use the Corallum command for inter-Agent communication or a Swarm Proposal. Your final prose stays in the native Harness trajectory.",
     "</corallum-turn>",
   ].join("\n\n")

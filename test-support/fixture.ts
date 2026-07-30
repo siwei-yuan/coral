@@ -236,6 +236,7 @@ class ScriptedHarnessAdapter implements HarnessAdapter {
       const plugin = pluginWorkspaces.find((workspace) => workspace.id === data.pluginId)
       if (!plugin?.writable) throw new Error(`Plugin workspace is not writable: ${data.pluginId}`)
       await writeFile(join(plugin.directory, "runtime.mjs"), runtimeSource(data.version ?? "unknown"))
+      await commitWorkspace(plugin.directory, `Update ${data.pluginId} to ${data.version}`)
     }
     if (data.command === "improve-agent") {
       await appendFile(join(workingDirectory, "AGENTS.md"), "Evolved responsibility: verify the result.\n")
@@ -243,6 +244,12 @@ class ScriptedHarnessAdapter implements HarnessAdapter {
       const composerPath = join(workingDirectory, "context.ts")
       const composer = await readFile(composerPath, "utf8")
       await writeFile(composerPath, composer.replace("composer:v1", "composer:v2"), "utf8")
+    }
+    if (data.command === "two-agent-commits") {
+      await writeFile(join(workingDirectory, "memory", "first.txt"), "first\n", "utf8")
+      await commitWorkspace(workingDirectory, "Record the first learning")
+      await writeFile(join(workingDirectory, "memory", "second.txt"), "second\n", "utf8")
+      await commitWorkspace(workingDirectory, "Record the second learning")
     }
     await mkdir(join(workingDirectory, "memory"), { recursive: true })
     if (data.command === "continue-main") {
@@ -272,6 +279,11 @@ class ScriptedHarnessAdapter implements HarnessAdapter {
         peerContent ?? `completed by ${agentId}`,
       ], { env: { ...process.env, ...core.env } })
     }
+    if (data.command !== "leave-dirty") {
+      await commitWorkspace(workingDirectory, `Apply ${data.command ?? "turn"} learning`)
+    } else {
+      await writeFile(join(workingDirectory, "memory", "uncommitted.txt"), "not durable\n", "utf8")
+    }
     const sessionId = input.checkpoint && !input.forkSession
       ? input.checkpoint.sessionId
       : `session-${++this.#sessions}`
@@ -280,6 +292,21 @@ class ScriptedHarnessAdapter implements HarnessAdapter {
       checkpoint: { harness: this.id, sessionId, turnId },
     }
   }
+}
+
+async function commitWorkspace(directory: string, message: string): Promise<void> {
+  const status = (await execute("git", ["-C", directory, "status", "--porcelain"])).stdout
+  if (!status.trim()) return
+  await execute("git", ["-C", directory, "add", "-A"])
+  await execute("git", ["-C", directory, "commit", "-m", message], {
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "Scripted Agent",
+      GIT_AUTHOR_EMAIL: "agent@corallum.local",
+      GIT_COMMITTER_NAME: "Scripted Agent",
+      GIT_COMMITTER_EMAIL: "agent@corallum.local",
+    },
+  })
 }
 
 function runtimeSource(version: string): string {

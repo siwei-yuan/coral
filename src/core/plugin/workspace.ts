@@ -5,6 +5,7 @@ import type {
   WorkspaceCheckout,
   WorkspaceFiles,
   WorkspaceCommit,
+  WorkspaceCheckoutResult,
 } from "../workspace/git-workspace.ts"
 
 export class PluginWorkspaceRuntime {
@@ -92,29 +93,51 @@ export class PluginWorkspaceRuntime {
     return this.workspaces.open(pluginId, commit, operationId)
   }
 
-  async commit(
+  finalizeCheckout(checkout: WorkspaceCheckout): Promise<WorkspaceCheckoutResult> {
+    return this.workspaces.finalizeCheckout(checkout)
+  }
+
+  async recordCheckoutResult(
     checkout: WorkspaceCheckout,
+    result: WorkspaceCheckoutResult,
     agentId: string,
     turnId: string,
     causation: string[],
-  ): Promise<{ workspaceCommit: WorkspaceCommit; event: LedgerEvent | null }> {
-    const workspaceCommit = await this.workspaces.commit(checkout, `Agent ${agentId} Plugin edit`, agentId)
-    if (workspaceCommit.commit === checkout.baseCommit) return { workspaceCommit, event: null }
-    await this.workspaces.retain(checkout.workspaceId, `draft/${workspaceCommit.commit}`, workspaceCommit.commit)
-    const event = this.ledger.append({
-      type: "plugin.workspace.committed",
-      actor: `agent/${agentId}`,
-      scope: activeScope(),
-      causation,
-      data: {
-        pluginId: checkout.workspaceId,
-        parentCommit: checkout.baseCommit,
-        commit: workspaceCommit.commit,
-        tree: workspaceCommit.tree,
-        turnId,
-      },
-    })
-    return { workspaceCommit, event }
+  ): Promise<{ workspaceCommit: WorkspaceCommit; events: LedgerEvent[] }> {
+    const events: LedgerEvent[] = []
+    for (const change of result.commits) {
+      await this.workspaces.retain(checkout.workspaceId, `draft/${change.commit}`, change.commit)
+      events.push(this.ledger.append({
+        type: "plugin.workspace.committed",
+        actor: `agent/${agentId}`,
+        scope: activeScope(),
+        causation,
+        data: {
+          pluginId: checkout.workspaceId,
+          parentCommit: change.parentCommit,
+          commit: change.commit,
+          tree: change.tree,
+          message: change.message,
+          turnId,
+        },
+      }))
+    }
+    if (result.restored) {
+      events.push(this.ledger.append({
+        type: "plugin.workspace.restored",
+        actor: "workspace/runtime",
+        scope: activeScope(),
+        causation,
+        data: {
+          pluginId: checkout.workspaceId,
+          commit: result.head.commit,
+          tree: result.head.tree,
+          agentId,
+          turnId,
+        },
+      }))
+    }
+    return { workspaceCommit: result.head, events }
   }
 
   close(checkout: WorkspaceCheckout): Promise<void> {
