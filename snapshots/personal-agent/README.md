@@ -14,9 +14,10 @@ Agents can create, remove, and list their own recurring schedules with the
 `scheduler` CLI.
 
 The Screen Plugin captures the foreground macOS window after meaningful,
-debounced activity, removes visually unchanged frames, and performs local
-Apple Vision OCR before JPEG storage. Each Ledger Event contains only an
-activity ID; the receiving Agent explicitly loads its artifacts with
+debounced activity and removes visually unchanged frames. It performs accurate
+local Apple Vision OCR on the full-resolution image, stores that image as PNG,
+and creates a compressed JPEG preview separately. Each Ledger Event contains
+only an activity ID; the receiving Agent explicitly loads its artifacts with
 `screen activity <id>`.
 
 Schedule records, Chat queues, and Screen captures are live Plugin state and

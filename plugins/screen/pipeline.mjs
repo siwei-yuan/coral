@@ -111,6 +111,7 @@ export class ScreenPipeline {
     assertCapture(input)
     assertIncoming(this.stateRoot, input.image)
     assertIncoming(this.stateRoot, input.preview)
+    assertIncoming(this.stateRoot, input.changeProbe)
     const capturedAt = new Date(input.capturedAt)
     if (Number.isNaN(capturedAt.valueOf())) throw new Error("Screen capture requires a valid time")
 
@@ -120,20 +121,15 @@ export class ScreenPipeline {
     if (!this.activity) await this.#begin(input)
 
     const captureId = `capture_${randomUUID()}`
-    const image = `captures/${captureId}.jpg`
+    const image = `captures/${captureId}.png`
+    const preview = `captures/${captureId}.preview.jpg`
     await rename(input.image, join(this.activity.directory, image))
+    await rename(input.preview, join(this.activity.directory, preview))
     this.activity.endedAt = input.capturedAt
-    this.activity.captures.push({ id: captureId, capturedAt: input.capturedAt, image, ocr: input.ocr })
+    this.activity.captures.push({ id: captureId, capturedAt: input.capturedAt, image, preview, ocr: input.ocr })
     await writeJson(join(this.activity.directory, "activity.json"), publicActivity(this.activity))
-    await rename(input.preview, join(this.stateRoot, "cache", "preview.bin"))
-    await writeJson(join(this.stateRoot, "cache", "preview.json"), { contextKey: input.contextKey })
-    if (input.ocrSignature) {
-      await writeJson(join(this.stateRoot, "cache", "ocr.json"), {
-        contextKey: input.contextKey,
-        signature: input.ocrSignature,
-        text: input.ocr,
-      })
-    }
+    await rename(input.changeProbe, join(this.stateRoot, "cache", "change-probe.bin"))
+    await writeJson(join(this.stateRoot, "cache", "change-probe.json"), { contextKey: input.contextKey })
 
     clearTimeout(this.quietTimer)
     this.quietTimer = setTimeout(() => {
@@ -184,7 +180,14 @@ export async function readCurrent(stateRoot) {
     if (!activityId) return null
     const root = join(stateRoot, "activities", activityId)
     const value = JSON.parse(await readFile(join(root, "activity.json"), "utf8"))
-    return { ...value, captures: value.captures.map((item) => ({ ...item, image: join(root, item.image) })) }
+    return {
+      ...value,
+      captures: value.captures.map((item) => ({
+        ...item,
+        image: join(root, item.image),
+        preview: join(root, item.preview),
+      })),
+    }
   } catch (error) {
     if (error?.code === "ENOENT") return null
     throw error
@@ -220,7 +223,7 @@ function publicActivity(activity) {
 }
 
 function assertCapture(input) {
-  if (!input.contextKey || !input.app?.name || !input.capturedAt || !input.image || !input.preview) {
+  if (!input.contextKey || !input.app?.name || !input.capturedAt || !input.image || !input.preview || !input.changeProbe) {
     throw new Error("Invalid native Screen capture")
   }
   if (typeof input.ocr !== "string") throw new Error("Invalid native Screen OCR")

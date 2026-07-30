@@ -8,7 +8,7 @@ export function createView({ current }) {
       const activity = await current()
       if (!activity) return `<p class="empty">No screen activity yet</p>`
       const captures = await Promise.all(activity.captures.map(async (capture) => {
-        const image = (await readFile(capture.image)).toString("base64")
+        const image = (await readFile(capture.preview)).toString("base64")
         return `<article class="screen-capture">
           <img src="data:image/jpeg;base64,${image}" alt="Screen captured at ${escapeHtml(capture.capturedAt)}">
           <div><p class="eyebrow">${escapeHtml(formatTime(capture.capturedAt))}</p><h3>Recognized text</h3><pre>${escapeHtml(capture.ocr || "No text recognized")}</pre></div>

@@ -23,7 +23,10 @@ if (!/^[A-Za-z0-9_-]+$/.test(activityId)) fail("invalid activity id")
 
 const activityRoot = join(stateRoot, "activities", activityId)
 const activity = JSON.parse(await readFile(join(activityRoot, "activity.json"), "utf8"))
-for (const capture of activity.captures) capture.image = join(activityRoot, capture.image)
+for (const capture of activity.captures) {
+  capture.image = join(activityRoot, capture.image)
+  capture.preview = join(activityRoot, capture.preview)
+}
 process.stdout.write(`${JSON.stringify(activity)}\n`)
 
 function fail(message) {

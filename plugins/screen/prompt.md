@@ -1,8 +1,8 @@
 # Screen
 
 Screen provides sparse foreground activity evidence: App session metadata,
-OCR, and local image paths. Use it when a `screen.activity` Communication is
-relevant to the Agent's responsibility.
+OCR, and local full-resolution and preview image paths. Use it when a
+`screen.activity` Communication is relevant to the Agent's responsibility.
 
 ## Commands
 

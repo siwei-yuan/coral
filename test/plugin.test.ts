@@ -76,16 +76,21 @@ test("Screen pipeline coalesces capture signals, persists an Activity, then emit
       activeVisualMs: 10,
       idleVisualMs: 20,
       activeForMs: 100,
-      suspendAfterMs: 200,
+      suspendAfterMs: 2_000,
       activityQuietMs: 15,
       maxActivityMs: 1_000,
     },
     capture: async () => {
       captures += 1
       if (captures > 1) return { type: "skip" }
-      const image = join(root, "incoming", "capture.jpg")
-      const preview = join(root, "incoming", "capture.preview")
-      await Promise.all([writeFile(image, "raw-image"), writeFile(preview, "preview")])
+      const image = join(root, "incoming", "capture.png")
+      const preview = join(root, "incoming", "capture.preview.jpg")
+      const changeProbe = join(root, "incoming", "capture.change-probe")
+      await Promise.all([
+        writeFile(image, "raw-image"),
+        writeFile(preview, "preview-image"),
+        writeFile(changeProbe, "change-probe"),
+      ])
       return {
         type: "capture",
         contextKey: "com.openai.codex:1",
@@ -93,8 +98,8 @@ test("Screen pipeline coalesces capture signals, persists an Activity, then emit
         capturedAt: "2026-07-29T10:01:00Z",
         image,
         preview,
+        changeProbe,
         ocr: "Implement the Screen Plugin",
-        ocrSignature: "ocr-1",
       }
     },
     emit: async (draft) => {
@@ -121,11 +126,12 @@ test("Screen pipeline coalesces capture signals, persists an Activity, then emit
   })
   const activity = JSON.parse(stdout) as {
     app: { name: string }
-    captures: Array<{ ocr: string; image: string }>
+    captures: Array<{ ocr: string; image: string; preview: string }>
   }
   assert.equal(activity.app.name, "Codex")
   assert.equal(activity.captures[0]?.ocr, "Implement the Screen Plugin")
   assert.equal(await readFile(activity.captures[0]!.image, "utf8"), "raw-image")
+  assert.equal(await readFile(activity.captures[0]!.preview, "utf8"), "preview-image")
   pipeline.visual()
   await waitFor(() => captures === 2)
   assert.equal(emitted.length, 1)

@@ -190,10 +190,11 @@ directly from the active Definition beside a time-filtered Event Ledger; replay
 animates routing along those existing topology edges. A Plugin may optionally
 provide a View-only extension.
 The pinned Chat Plugin adds a conversation surface and the pinned Screen Plugin
-renders raw image, OCR, and foreground App session. Extensions add UI only and
+renders a compressed preview beside OCR and foreground App session metadata;
+its CLI also exposes the full-resolution image. Extensions add UI only and
 receive no Revision decision authority.
 
 Screen capture is event-driven and macOS-local. Its Event carries only an
 activity ID; authorized Agents call `screen activity <id>` to load OCR and
-image paths from Plugin state when needed. Screenshot bytes never enter the
-Ledger or automatic Agent context.
+full-resolution and preview image paths from Plugin state when needed.
+Screenshot bytes never enter the Ledger or automatic Agent context.
