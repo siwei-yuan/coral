@@ -1,22 +1,16 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { projectLedger } from "../src/index.ts"
-import { contextText, createFixture } from "../test-support/fixture.ts"
+import { contextText, createFixture, proposeFromAgent, userMessage } from "../test-support/fixture.ts"
 
 test("a workspace commit immediately changes the Agent's next turn without a Swarm Proposal", async (t) => {
   const { swarm, ledger, workspaces, adapter, revision, initial } = await createFixture(t)
-  const improvement = swarm.appendInput({
-    type: "agent.workspace.improvement.requested",
-    actor: "external/user",
-    data: { request: "improve your workspace" },
-  })
+  const improvement = swarm.appendInput(userMessage("builder", "improve your workspace", {
+    command: "improve-agent",
+  }))
 
   const first = await swarm.runAgentTurn({ agentId: "builder", inputEventId: improvement.id })
-  const followup = swarm.appendInput({
-    type: "agent.workspace.followup.requested",
-    actor: "external/user",
-    data: { request: "use your improved workspace" },
-  })
+  const followup = swarm.appendInput(userMessage("builder", "use your improved workspace"))
   const second = await swarm.runAgentTurn({ agentId: "builder", inputEventId: followup.id })
 
   assert.notEqual(first.workspaceCommit.commit, initial.commit)
@@ -40,16 +34,60 @@ test("a workspace commit immediately changes the Agent's next turn without a Swa
   assert.equal(ledger.verify(), true)
 })
 
+test("Harness checkpoints resume until a workspace or Swarm snapshot boundary forks the session", async (t) => {
+  const { swarm, adapter, ledger } = await createFixture(t)
+  const run = async (text: string, data: Record<string, unknown> = {}) => {
+    const event = swarm.appendInput(userMessage("builder", text, data))
+    return swarm.runAgentTurn({ agentId: "builder", inputEventId: event.id })
+  }
+
+  const first = await run("observe")
+  const second = await run("observe again")
+  assert.equal(adapter.runs[1]?.forkSession, false)
+  assert.equal(first.checkpoint?.sessionId, second.checkpoint?.sessionId)
+
+  await run("change your context", { command: "improve-agent" })
+  const afterCommit = await run("use the new context")
+  assert.equal(adapter.runs[3]?.forkSession, true)
+  assert.notEqual(second.checkpoint?.sessionId, afterCommit.checkpoint?.sessionId)
+
+  const proposal = await proposeFromAgent(swarm)
+  const proposalEvent = ledger.get(proposal.eventId)
+  const proposalTurn = ledger.get(proposalEvent.causation[0]!)
+  const proposalCheckpoint = (proposalTurn.data as { trajectory: typeof afterCommit.checkpoint }).trajectory
+  assert.equal(proposalTurn.actor, "agent/runtime")
+  assert.equal(typeof (proposalTurn.data as { turnId?: unknown }).turnId, "string")
+  const afterProposal = await run("continue on Main")
+  assert.equal(adapter.runs[5]?.forkSession, true)
+  assert.notEqual(afterCommit.checkpoint?.sessionId, afterProposal.checkpoint?.sessionId)
+
+  const firstFork = swarm.createFork(proposal.id, "owner")
+  const secondFork = swarm.createFork(proposal.id, "owner")
+  const start = adapter.runs.length
+  await swarm.runForks([firstFork.id, secondFork.id])
+  const forkRuns = adapter.runs.slice(start).filter((item) => item.agentId === "builder")
+  assert.equal(forkRuns.length, 2)
+  assert.equal(forkRuns.every((item) => item.forkSession), true)
+  assert.deepEqual(forkRuns[0]?.checkpoint, proposalCheckpoint)
+  assert.deepEqual(forkRuns[1]?.checkpoint, proposalCheckpoint)
+  const forkTurns = [firstFork, secondFork].flatMap((fork) =>
+    swarm.eventsVisibleToFork(fork.id).filter((event) => event.type === "agent.turn.recorded" && event.scope.kind === "fork"),
+  )
+  assert.equal(new Set(forkTurns.map((event) =>
+    ((event.data as { trajectory: { sessionId: string } }).trajectory.sessionId),
+  )).size, 2)
+})
+
 test("Plugin drafts evolve immediately but only a Human-approved Swarm Revision changes the active pin", async (t) => {
   const { swarm, ledger, definition, adapter, pluginGit } = await createFixture(t)
   const v1 = definition.plugins[0]!.commit
 
   const edit = async (version: string) => {
-    const input = swarm.appendInput({
-      type: "plugin.workspace.improvement.requested",
-      actor: "external/user",
-      data: { pluginId: "chat", version },
-    })
+    const input = swarm.appendInput(userMessage("builder", `update Chat to ${version}`, {
+      command: "improve-plugin",
+      pluginId: "chat",
+      version,
+    }))
     return swarm.runAgentTurn({ agentId: "builder", inputEventId: input.id })
   }
 
@@ -62,17 +100,14 @@ test("Plugin drafts evolve immediately but only a Human-approved Swarm Revision 
   assert.notEqual(v3, v2)
   assert.equal(swarm.activeRevision().definition.plugins[0]!.commit, v1)
   assert.equal(swarm.pluginDraftHead("chat"), v3)
-  assert.equal(adapter.runs.at(-1)?.pluginCommands[0]?.commit, v1)
+  assert.equal(adapter.runs.at(-1)?.pluginWorkspaces[0]?.activeCommit, v1)
   assert.equal(adapter.runs.at(-1)?.pluginWorkspaces[0]?.draftCommit, v2)
   assert.match(await pluginGit.read("chat", v3, "runtime.ts"), /chat:v3/)
 
   const proposedDefinition = structuredClone(definition)
   proposedDefinition.plugins[0]!.commit = v3
-  const reason = swarm.appendInput({ type: "swarm.evolution.requested", actor: "external/user" })
-  const proposal = await swarm.propose({
-    authoredBy: "builder",
+  const proposal = await proposeFromAgent(swarm, {
     definition: proposedDefinition,
-    reasonEventIds: [reason.id],
   })
   assert.deepEqual(proposal.pluginCommits.chat?.map((item) => item.commit), [v2, v3])
 
@@ -82,8 +117,8 @@ test("Plugin drafts evolve immediately but only a Human-approved Swarm Revision 
   const forkPlugin = adapter.runs.slice(forkRunStart).find((run) =>
     run.pluginWorkspaces.some((plugin) => plugin.id === "chat"),
   )
-  assert.equal(forkPlugin?.pluginCommands[0]?.commit, v3)
-  assert.equal(forkPlugin?.pluginCommands[0]?.mode, "mock")
+  assert.equal(forkPlugin?.pluginWorkspaces[0]?.activeCommit, v3)
+  assert.equal(forkPlugin?.commands.find((command) => command.id === "chat")?.env?.CORALLUM_PLUGIN_MODE, "mock")
   assert.equal(forkPlugin?.pluginWorkspaces[0]?.writable, false)
 
   const v4 = (await edit("chat:v4")).pluginWorkspaceCommits.chat!.commit
@@ -100,46 +135,30 @@ test("Plugin drafts evolve immediately but only a Human-approved Swarm Revision 
 
   const nextDefinition = structuredClone(revision.definition)
   nextDefinition.plugins[0]!.commit = v4
-  const nextReason = swarm.appendInput({ type: "swarm.evolution.requested", actor: "external/user" })
-  const nextProposal = await swarm.propose({
-    authoredBy: "builder",
+  const nextProposal = await proposeFromAgent(swarm, {
     definition: nextDefinition,
-    reasonEventIds: [nextReason.id],
   })
   assert.deepEqual(nextProposal.pluginCommits.chat?.map((item) => item.commit), [v4])
 
   await edit("chat:v5")
-  assert.equal(adapter.runs.at(-1)?.pluginCommands[0]?.commit, v3)
+  assert.equal(adapter.runs.at(-1)?.pluginWorkspaces[0]?.activeCommit, v3)
   assert.equal(adapter.runs.at(-1)?.pluginWorkspaces[0]?.draftCommit, v4)
 })
 
 test("a Revision snapshots Agent commits and Forks can start from any Revision or Proposal", async (t) => {
   const { swarm, ledger, definition, revision } = await createFixture(t)
   for (const request of ["improve context", "improve memory"]) {
-    const input = swarm.appendInput({
-      type: "agent.workspace.improvement.requested",
-      actor: "external/user",
-      data: { request },
-    })
+    const input = swarm.appendInput(userMessage("builder", request, { command: "improve-agent" }))
     await swarm.runAgentTurn({ agentId: "builder", inputEventId: input.id })
   }
-  const reviewInput = swarm.appendInput({
-    type: "agent.workspace.improvement.requested",
-    actor: "external/user",
-    data: { request: "improve review procedure" },
-  })
+  const reviewInput = swarm.appendInput(userMessage("reviewer", "improve review procedure", {
+    command: "improve-agent",
+  }))
   await swarm.runAgentTurn({ agentId: "reviewer", inputEventId: reviewInput.id })
-  const reason = swarm.appendInput({
-    type: "swarm.evolution.requested",
-    actor: "external/user",
-    data: { goal: "find the best independently evolved Swarm" },
-  })
   const proposedDefinition = structuredClone(definition)
   proposedDefinition.routes.push({ from: "reviewer", to: "builder" })
-  const proposal = await swarm.propose({
-    authoredBy: "builder",
+  const proposal = await proposeFromAgent(swarm, {
     definition: proposedDefinition,
-    reasonEventIds: [reason.id],
   })
   const first = swarm.createFork(proposal.id, "owner")
   const second = swarm.createFork(proposal.id, "owner")
@@ -203,20 +222,13 @@ test("a Revision snapshots Agent commits and Forks can start from any Revision o
 
 test("the selected Fork becomes Main and later Main workspace commits continue after its Revision snapshot", async (t) => {
   const { swarm, ledger, workspaces, revision } = await createFixture(t)
-  const reason = swarm.appendInput({
-    type: "swarm.evolution.requested",
-    actor: "external/user",
-    data: { goal: "evaluate a new Swarm snapshot" },
-  })
-  const proposal = await swarm.propose({ authoredBy: "builder", reasonEventIds: [reason.id] })
+  const proposal = await proposeFromAgent(swarm)
   const fork = swarm.createFork(proposal.id, "owner")
   const forkResult = await swarm.runFork(fork.id)
 
-  const continued = swarm.appendInput({
-    type: "agent.workspace.continuation.requested",
-    actor: "external/user",
-    data: { request: "continue evolving while the Proposal is evaluated" },
-  })
+  const continued = swarm.appendInput(userMessage("builder", "continue evolving while the Proposal is evaluated", {
+    command: "continue-main",
+  }))
   const tail = await swarm.runAgentTurn({ agentId: "builder", inputEventId: continued.id })
   const oldMainHead = tail.workspaceCommit.commit
 
@@ -246,32 +258,20 @@ test("the selected Fork becomes Main and later Main workspace commits continue a
   assert.equal((reapplied?.data as { commit?: string }).commit, newMainHead)
   assert.equal(promoted.parentRevision, revision.id)
 
-  const nextReason = swarm.appendInput({
-    type: "swarm.evolution.requested",
-    actor: "external/user",
-    data: { goal: "snapshot the continued Main" },
-  })
-  const nextProposal = await swarm.propose({ authoredBy: "builder", reasonEventIds: [nextReason.id] })
+  const nextProposal = await proposeFromAgent(swarm)
   assert.equal(nextProposal.agentHeads.builder, newMainHead)
   assert.equal(nextProposal.workspaceCommits.builder?.at(-1)?.commit, newMainHead)
 })
 
 test("a workspace conflict leaves the old Main intact", async (t) => {
   const { swarm, ledger, revision } = await createFixture(t)
-  const reason = swarm.appendInput({
-    type: "swarm.evolution.requested",
-    actor: "external/user",
-    data: { goal: "evaluate a conflicting Swarm snapshot" },
-  })
-  const proposal = await swarm.propose({ authoredBy: "builder", reasonEventIds: [reason.id] })
+  const proposal = await proposeFromAgent(swarm)
   const fork = swarm.createFork(proposal.id, "owner")
   const forkResult = await swarm.runFork(fork.id)
 
-  const continued = swarm.appendInput({
-    type: "agent.workspace.improvement.requested",
-    actor: "external/user",
-    data: { request: "write the same Main workspace file differently" },
-  })
+  const continued = swarm.appendInput(userMessage("builder", "write the same Main workspace file differently", {
+    command: "improve-agent",
+  }))
   const tail = await swarm.runAgentTurn({ agentId: "builder", inputEventId: continued.id })
 
   await assert.rejects(swarm.approve(fork.id, forkResult.frontier, "owner"), /Cannot reapply commit for workspace/)

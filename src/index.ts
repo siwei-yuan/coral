@@ -1,5 +1,6 @@
 export { AgentRuntime } from "./core/agent/runtime.ts"
 export type { AgentPluginAccess, AgentTurnInput, AgentTurnResult } from "./core/agent/runtime.ts"
+export type { AgentAction, ProposeAction, SendAction } from "./core/agent/actions.ts"
 export type { AgentDefinition } from "./core/agent/definition.ts"
 export { Ledger, activeScope, forkScope } from "./core/ledger/ledger.ts"
 export type { EventDraft, LedgerEvent, Scope } from "./core/ledger/ledger.ts"
@@ -14,7 +15,9 @@ export type {
 export { WorkspaceBridge } from "./core/workspace/context-bridge.ts"
 export type { ContextMessage } from "./core/workspace/context-bridge.ts"
 export { PluginWorkspaceRuntime } from "./core/plugin/workspace.ts"
+export type { PluginExecutable } from "./core/plugin/executable.ts"
 export { Swarm } from "./core/swarm/runtime.ts"
+export type { SwarmTurnResult } from "./core/swarm/runtime.ts"
 export { projectAgentSwarmView, validateDefinition } from "./core/swarm/definition.ts"
 export type {
   AgentSwarmView,
@@ -27,13 +30,16 @@ export type {
 export type { CommitEvidence, ForkSnapshot, SwarmProposal, SwarmRevision } from "./core/swarm/revision.ts"
 export type {
   HarnessAdapter,
-  HarnessEmission,
+  HarnessCheckpoint,
+  HarnessCommand,
   HarnessInput,
-  HarnessPluginCommand,
+  HarnessPeerWorkspace,
   HarnessPluginWorkspace,
   HarnessResult,
-  PluginExecutable,
 } from "./harness/adapter.ts"
+export { CodexHarnessAdapter } from "./harness/codex.ts"
+export { ClaudeCodeHarnessAdapter } from "./harness/claude-code.ts"
+export { PiHarnessAdapter } from "./harness/pi.ts"
 export type { PluginEnvironment } from "./core/swarm/runtime.ts"
 export { ChatRuntime } from "../plugins/chat/runtime.ts"
 export type { ChatMessage, ChatReply } from "../plugins/chat/runtime.ts"

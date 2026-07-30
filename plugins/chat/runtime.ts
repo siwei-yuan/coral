@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url"
 import type { EventDraft } from "../../src/core/ledger/ledger.ts"
 import { activeScope } from "../../src/core/ledger/ledger.ts"
 import type { PluginBinding } from "../../src/core/swarm/definition.ts"
-import type { PluginExecutable } from "../../src/harness/adapter.ts"
+import type { PluginExecutable } from "../../src/core/plugin/executable.ts"
 
 export interface ChatMessage {
   recipients: string[]
@@ -37,7 +37,7 @@ export class ChatRuntime {
     return {
       id: this.id,
       executable: fileURLToPath(new URL("bin/chat.mjs", import.meta.url)),
-      env: { CORALLUM_PLUGIN_STATE: this.stateRoot },
+      env: { CORALLUM_CHAT_STATE: this.stateRoot },
     }
   }
 

@@ -51,10 +51,10 @@ adds commit Events to Plugin workspaces. Swarm combines Agents and exact commit
 IDs. Concrete Plugin runtimes and Snapshots remain outside Core. The code is
 strict TypeScript executed directly by Node.js.
 
-This first implementation keeps the Ledger and Swarm runtime in process while
-using real Git repositories and worktrees. Persistence and native Harness
-Adapters can be added behind the existing boundaries without changing the core
-evolution protocol.
+This implementation keeps the Ledger and Swarm runtime in process, uses real
+Git repositories and worktrees, and includes native Codex, Claude Code, and Pi
+Adapters. Durable runtime persistence and deployment remain separate concerns;
+they do not change the evolution protocol.
 
 ## Core lifecycle
 
@@ -72,6 +72,13 @@ Main Swarm
 A workspace commit immediately becomes that Agent instance's next state. It
 never creates a Proposal implicitly. Workspace storage does not know about
 Swarm Forks; a Fork merely starts with a set of Agent commit IDs.
+
+Every `agent.turn.recorded` Event identifies the resumable Harness session,
+provider checkpoint, and Corallum turn marker. Normal turns resume that session.
+A workspace commit or Swarm snapshot boundary makes the next turn fork the
+recorded checkpoint, so a Revision or Proposal frontier identifies both the
+exact Agent workspace and its trajectory without copying session history into
+the Ledger.
 
 Ordinary Agent collaboration uses only `communication.sent`. The active
 Definition declares allowed Agent-to-Agent edges; Main and Forks validate those
@@ -101,10 +108,12 @@ workspace begins with a Framework-created, Ledger-backed root commit, and a new
 Agent must provide that initial commit. Removing an Agent removes it
 from the new Definition and heads but never deletes its Git or Ledger history.
 
-An Agent may emit `swarm.revision.requested` with a complete Definition. After
-that turn's workspace commit is recorded, Main turns it into the immutable
-Proposal that enters the normal Fork and Human-gated lifecycle. Evaluation is a
-View projection over recorded facts, not a Core Event.
+An Agent uses `corallum send` for routed communication and `corallum propose`
+for a complete candidate Definition. These commands record private turn
+actions; after the Harness returns, Core commits workspace changes, validates
+the actions, and appends the authoritative Events. A Harness cannot emit
+arbitrary Ledger Events. Evaluation is a View projection over recorded facts,
+not a Core Event.
 
 See [docs/DESIGN.md](docs/DESIGN.md).
 

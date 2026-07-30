@@ -6,7 +6,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 import { ChatRuntime, SchedulerRuntime, ScreenRuntime } from "../src/index.ts"
-import { createFixture, pluginSeed } from "../test-support/fixture.ts"
+import { createFixture, pluginSeed, proposeFromAgent } from "../test-support/fixture.ts"
 
 const execute = promisify(execFile)
 
@@ -131,8 +131,7 @@ test("Scheduler CLI owns recurring notes and its inbound Events follow declared 
     { plugin: "scheduler", ingressTo: "builder" },
     { plugin: "scheduler", ingressTo: "reviewer" },
   )
-  const reason = swarm.appendInput({ type: "swarm.evolution.requested", actor: "external/user" })
-  const proposal = await swarm.propose({ authoredBy: "builder", definition: proposed, reasonEventIds: [reason.id] })
+  const proposal = await proposeFromAgent(swarm, { definition: proposed })
   const fork = swarm.createFork(proposal.id, "owner")
   const result = await swarm.runFork(fork.id)
   await swarm.approve(fork.id, result.frontier, "owner")

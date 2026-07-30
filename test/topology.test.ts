@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { contextText, createFixture, workspaceSeed } from "../test-support/fixture.ts"
+import { contextText, createFixture, proposeFromAgent, userMessage, workspaceSeed } from "../test-support/fixture.ts"
 
 test("a Proposal may add an Agent only with an initialized workspace", async (t) => {
   const { swarm, agentRuntime, adapter, definition } = await createFixture(t)
@@ -23,24 +23,16 @@ test("a Proposal may add an Agent only with an initialized workspace", async (t)
         },
       },
     ],
-    expect: { eventType: "communication.sent" },
+    expect: { eventType: "agent.turn.recorded" },
   })
-  const reason = swarm.appendInput({
-    type: "swarm.evolution.requested",
-    actor: "external/user",
-    data: { goal: "add an auditor" },
-  })
-
   await assert.rejects(
-    swarm.propose({ authoredBy: "builder", definition: proposed, reasonEventIds: [reason.id] }),
+    proposeFromAgent(swarm, { definition: proposed }),
     /exactly match the Agents added/,
   )
 
-  const proposal = await swarm.propose({
-    authoredBy: "builder",
+  const proposal = await proposeFromAgent(swarm, {
     definition: proposed,
     addedAgentHeads: { auditor: auditor.commit },
-    reasonEventIds: [reason.id],
   })
   assert.equal(proposal.workspaceCommits.auditor?.[0]?.commit, auditor.commit)
   assert.ok(proposal.workspaceCommits.auditor?.[0]?.eventId)
@@ -64,31 +56,21 @@ test("a Proposal may add an Agent only with an initialized workspace", async (t)
 
 test("a Proposal may remove an Agent without deleting its auditable history", async (t) => {
   const { swarm, adapter, definition, revision } = await createFixture(t)
-  const improvement = swarm.appendInput({
-    type: "agent.workspace.improvement.requested",
-    actor: "external/user",
-    data: { request: "improve reviewer before removal" },
-  })
+  const improvement = swarm.appendInput(userMessage("reviewer", "improve reviewer before removal", {
+    command: "improve-agent",
+  }))
   await swarm.runAgentTurn({ agentId: "reviewer", inputEventId: improvement.id })
-  const reason = swarm.appendInput({
-    type: "swarm.evolution.requested",
-    actor: "external/user",
-    data: { goal: "remove the reviewer" },
-  })
-
   const invalid = structuredClone(definition)
   invalid.agents = invalid.agents.filter((agent) => agent.id !== "reviewer")
   await assert.rejects(
-    swarm.propose({ authoredBy: "builder", definition: invalid, reasonEventIds: [reason.id] }),
+    proposeFromAgent(swarm, { definition: invalid }),
     /existing sender and receiver Agents/,
   )
 
   const proposed = structuredClone(invalid)
   proposed.routes = proposed.routes.filter((route) => route.from !== "reviewer" && route.to !== "reviewer")
-  const proposal = await swarm.propose({
-    authoredBy: "builder",
+  const proposal = await proposeFromAgent(swarm, {
     definition: proposed,
-    reasonEventIds: [reason.id],
   })
   assert.equal(proposal.agentHeads.reviewer, undefined)
   assert.equal(proposal.workspaceCommits.reviewer?.length, 1)

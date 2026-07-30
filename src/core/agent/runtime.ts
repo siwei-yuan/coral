@@ -1,11 +1,15 @@
 import { randomUUID } from "node:crypto"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type {
   HarnessAdapter,
-  HarnessEmission,
-  HarnessPluginCommand,
+  HarnessCheckpoint,
+  HarnessCommand,
+  HarnessPeerWorkspace,
   HarnessPluginWorkspace,
 } from "../../harness/adapter.ts"
+import { coreCommand, readActions, type AgentAction } from "./actions.ts"
 import type { AgentDefinition } from "./definition.ts"
 import type { PluginWorkspaceRuntime } from "../plugin/workspace.ts"
 import { WorkspaceBridge } from "../workspace/context-bridge.ts"
@@ -27,6 +31,8 @@ export interface AgentTurnInput {
   runtimeContext?: Record<string, unknown>
   workspaceHeads?: Record<string, string>
   pluginAccess?: AgentPluginAccess[]
+  checkpoint?: HarnessCheckpoint
+  forkSession?: boolean
 }
 
 export interface AgentPluginAccess {
@@ -41,7 +47,8 @@ export interface AgentPluginAccess {
 export interface AgentTurnResult {
   workspaceCommit: WorkspaceCommit
   pluginWorkspaceCommits: Record<string, WorkspaceCommit>
-  outputEvents: LedgerEvent[]
+  actions: AgentAction[]
+  checkpoint: HarnessCheckpoint | null
   workspaceEvent: LedgerEvent | null
   pluginWorkspaceEvents: LedgerEvent[]
   turnEvent: LedgerEvent
@@ -124,6 +131,8 @@ export class AgentRuntime {
     runtimeContext = {},
     workspaceHeads = {},
     pluginAccess = [],
+    checkpoint,
+    forkSession = false,
   }: AgentTurnInput): Promise<AgentTurnResult> {
     const adapter = this.adapters.get(agent.harness)
     if (!adapter) throw new Error(`Harness Adapter is not registered: ${agent.harness}`)
@@ -133,10 +142,12 @@ export class AgentRuntime {
     const turnId = randomUUID()
     const checkout = await this.workspaces.open(agent.id, baseCommit, turnId)
     const openedPlugins = await this.#openPlugins(pluginAccess, agent.id, turnId)
+    const openedPeers = await this.#openPeers(workspaceHeads, agent.id, turnId)
+    const actionRoot = await mkdtemp(join(tmpdir(), "corallum-turn-"))
+    const actionsFile = join(actionRoot, "actions.jsonl")
     try {
       let outcome = "failed"
-      let emissions: HarnessEmission[] = []
-      let trajectory: unknown = null
+      let nextCheckpoint: HarnessCheckpoint | null = null
       let failure: string | undefined
 
       try {
@@ -149,25 +160,28 @@ export class AgentRuntime {
         })
         const result = await adapter.run({
           turnId,
-          agentId: agent.id,
-          scope,
           workingDirectory: checkout.worktree,
-          inputEvents,
           context,
-          pluginCommands: openedPlugins.flatMap((plugin) => plugin.command ? [plugin.command] : []),
+          commands: [
+            coreCommand(actionsFile, agent.id),
+            ...openedPlugins.flatMap((plugin) => plugin.command ? [plugin.command] : []),
+          ],
           pluginWorkspaces: openedPlugins.map((plugin) => plugin.workspace),
-          readWorkspace: (agentId, path) => {
-            const commit = workspaceHeads[agentId]
-            if (!commit) throw new Error(`Agent workspace is not visible: ${agentId}`)
-            return this.workspaces.read(agentId, commit, path)
-          },
+          peerWorkspaces: openedPeers.map((peer) => peer.workspace),
+          ...(checkpoint ? { checkpoint } : {}),
+          forkSession,
         })
-        outcome = result.outcome ?? "completed"
-        const nextEmissions = result.events ?? []
-        for (const emission of nextEmissions) assertAgentEmission(emission)
-        emissions = nextEmissions
-        trajectory = result.trajectory ?? null
+        outcome = result.outcome
+        nextCheckpoint = result.checkpoint
       } catch (error) {
+        failure = error instanceof Error ? error.message : String(error)
+      }
+
+      let actions: AgentAction[] = []
+      try {
+        actions = await readActions(actionsFile)
+      } catch (error) {
+        outcome = "failed"
         failure = error instanceof Error ? error.message : String(error)
       }
 
@@ -190,18 +204,6 @@ export class AgentRuntime {
         }
       }
 
-      const outputEvents = emissions.map((emission) =>
-        this.ledger.append({
-          type: emission.type,
-          ...(emission.schema ? { schema: emission.schema } : {}),
-          actor: `agent/${agent.id}`,
-          scope,
-          causation: inputEvents.map((event) => event.id),
-          data: emission.data ?? null,
-          ...(emission.evidence !== undefined ? { evidence: emission.evidence } : {}),
-        }),
-      )
-
       let workspaceEvent: LedgerEvent | null = null
       if (workspaceCommit.commit !== baseCommit) {
         workspaceEvent = this.ledger.append({
@@ -221,24 +223,37 @@ export class AgentRuntime {
 
       const turnEvent = this.ledger.append({
         type: "agent.turn.recorded",
-        actor: `agent/${agent.id}`,
+        actor: "agent/runtime",
         scope,
         causation: inputEvents.map((event) => event.id),
         data: {
+          turnId,
           agentId: agent.id,
           inputEventIds: inputEvents.map((event) => event.id),
-          outputEventIds: outputEvents.map((event) => event.id),
           inputWorkspaceCommit: baseCommit,
           workspaceCommit: workspaceCommit.commit,
           outcome,
-          ...(trajectory ? { trajectory } : {}),
+          ...(nextCheckpoint ? { trajectory: nextCheckpoint } : {}),
           ...(failure ? { failure } : {}),
         },
       })
 
-      return { workspaceCommit, pluginWorkspaceCommits, outputEvents, workspaceEvent, pluginWorkspaceEvents, turnEvent }
+      return {
+        workspaceCommit,
+        pluginWorkspaceCommits,
+        actions,
+        checkpoint: nextCheckpoint,
+        workspaceEvent,
+        pluginWorkspaceEvents,
+        turnEvent,
+      }
     } finally {
-      await Promise.all([this.#closePlugins(openedPlugins), this.workspaces.close(checkout)])
+      await Promise.all([
+        this.#closePlugins(openedPlugins),
+        this.#closePeers(openedPeers),
+        this.workspaces.close(checkout),
+        rm(actionRoot, { recursive: true, force: true }),
+      ])
     }
   }
 
@@ -269,10 +284,8 @@ export class AgentRuntime {
           ...(plugin.command ? {
             command: {
               id: plugin.id,
-              command: plugin.command,
               executable: join(activeCheckout.worktree, "bin", `${plugin.command}.mjs`),
-              mode: plugin.mode,
-              commit: plugin.activeCommit,
+              usage: plugin.command,
               env: {
                 ...plugin.env,
                 CORALLUM_AGENT_ID: agentId,
@@ -303,6 +316,28 @@ export class AgentRuntime {
     ]))
   }
 
+  async #openPeers(heads: Record<string, string>, self: string, turnId: string): Promise<OpenedPeer[]> {
+    const opened: OpenedPeer[] = []
+    try {
+      for (const [agentId, commit] of Object.entries(heads)) {
+        if (agentId === self) continue
+        const checkout = await this.workspaces.open(agentId, commit, `${turnId}/peer/${agentId}`)
+        opened.push({
+          checkout,
+          workspace: { agentId, commit, directory: checkout.worktree },
+        })
+      }
+      return opened
+    } catch (error) {
+      await this.#closePeers(opened)
+      throw error
+    }
+  }
+
+  async #closePeers(opened: OpenedPeer[]): Promise<void> {
+    await Promise.all(opened.map((peer) => this.workspaces.close(peer.checkout)))
+  }
+
   #initializationEvent(agentId: string, commit: string): LedgerEvent | undefined {
     return this.ledger.all().find((event) => {
       if (event.type !== "agent.workspace.initialized") return false
@@ -315,12 +350,11 @@ export class AgentRuntime {
 interface OpenedPlugin {
   activeCheckout: WorkspaceCheckout
   draftCheckout?: WorkspaceCheckout
-  command?: HarnessPluginCommand
+  command?: HarnessCommand
   workspace: HarnessPluginWorkspace
 }
 
-function assertAgentEmission(emission: HarnessEmission): void {
-  if (emission.type !== "communication.sent" && emission.type !== "swarm.revision.requested") {
-    throw new Error(`Agent may only emit Communication or Swarm evolution Events: ${emission.type}`)
-  }
+interface OpenedPeer {
+  checkout: WorkspaceCheckout
+  workspace: HarnessPeerWorkspace
 }

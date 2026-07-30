@@ -1,29 +1,17 @@
 import type { ContextMessage } from "../core/workspace/context-bridge.ts"
-import type { LedgerEvent, Scope } from "../core/ledger/ledger.ts"
 
-export interface HarnessEmission {
-  type: string
-  schema?: string
-  data?: unknown
-  evidence?: unknown
+export interface HarnessCheckpoint {
+  harness: string
+  sessionId: string
+  turnId: string
 }
 
-export interface HarnessResult {
-  outcome?: string
-  events?: HarnessEmission[]
-  trajectory?: unknown
-}
-
-export interface PluginExecutable {
+export interface HarnessCommand {
   id: string
   executable: string
+  arguments?: string[]
+  usage: string
   env?: Record<string, string>
-}
-
-export interface HarnessPluginCommand extends PluginExecutable {
-  command: string
-  mode: string
-  commit: string
 }
 
 export interface HarnessPluginWorkspace {
@@ -34,19 +22,29 @@ export interface HarnessPluginWorkspace {
   writable: boolean
 }
 
+export interface HarnessPeerWorkspace {
+  agentId: string
+  directory: string
+  commit: string
+}
+
 export interface HarnessInput {
   turnId: string
-  agentId: string
-  scope: Scope
   workingDirectory: string
-  inputEvents: LedgerEvent[]
   context: ContextMessage[]
-  pluginCommands: HarnessPluginCommand[]
+  commands: HarnessCommand[]
   pluginWorkspaces: HarnessPluginWorkspace[]
-  readWorkspace(agentId: string, path: string): Promise<string>
+  peerWorkspaces: HarnessPeerWorkspace[]
+  checkpoint?: HarnessCheckpoint
+  forkSession: boolean
+}
+
+export interface HarnessResult {
+  outcome: "completed" | "failed" | "cancelled"
+  checkpoint: HarnessCheckpoint | null
 }
 
 export interface HarnessAdapter {
-  id: string
+  readonly id: string
   run(input: HarnessInput): Promise<HarnessResult>
 }

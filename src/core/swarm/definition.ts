@@ -22,7 +22,7 @@ export interface PluginBinding {
 
 export interface SwarmTest {
   id: string
-  inputEvents: Array<{ type: string; schema?: string; data?: unknown }>
+  inputEvents: Array<{ type: "communication.sent"; schema?: string; data?: unknown }>
   expect: { eventType: string }
 }
 
@@ -99,6 +99,9 @@ export function validateDefinition(definition: unknown): SwarmDefinition {
   for (const test of copy.tests) {
     if (!test.id || !Array.isArray(test.inputEvents) || test.inputEvents.length === 0) {
       throw new Error("Every Swarm test requires id and input Events")
+    }
+    if (test.inputEvents.some((event) => event.type !== "communication.sent")) {
+      throw new Error("Swarm test inputs must be communication.sent")
     }
     if (!test.expect?.eventType) throw new Error("Every Swarm test requires an expected Event type")
   }

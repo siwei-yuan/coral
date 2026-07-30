@@ -1,6 +1,8 @@
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { execFile } from "node:child_process"
+import { promisify } from "node:util"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import type { TestContext } from "node:test"
 import {
   AgentRuntime,
@@ -10,13 +12,17 @@ import {
   Swarm,
   type ContextMessage,
   type HarnessAdapter,
+  type HarnessCheckpoint,
+  type HarnessCommand,
   type HarnessInput,
-  type HarnessPluginCommand,
   type HarnessPluginWorkspace,
   type HarnessResult,
   type SwarmDefinition,
+  type SwarmProposal,
   type WorkspaceFiles,
 } from "../src/index.ts"
+
+const execute = promisify(execFile)
 
 export async function createFixture(t: TestContext) {
   const root = await mkdtemp(join(tmpdir(), "corallum-"))
@@ -65,10 +71,11 @@ export async function createFixture(t: TestContext) {
               from: "test/core-behavior",
               to: ["agent/builder"],
               content: [{ type: "text", text: "improve the same behavior" }],
+              command: "improve-agent",
             },
           },
         ],
-        expect: { eventType: "communication.sent" },
+        expect: { eventType: "agent.turn.recorded" },
       },
     ],
   }
@@ -99,6 +106,44 @@ export function pluginSeed(id: string): WorkspaceFiles {
     [`bin/${id}.mjs`]: `#!/usr/bin/env node\nconsole.log(${JSON.stringify(`${id}:v1`)})\n`,
     "runtime.ts": `export const version = ${JSON.stringify(`${id}:v1`)}\n`,
   }
+}
+
+export function userMessage(agentId: string, text: string, data: Record<string, unknown> = {}) {
+  return {
+    type: "communication.sent" as const,
+    actor: "external/user",
+    data: {
+      from: "external/user",
+      to: [`agent/${agentId}`],
+      content: [{ type: "text", text }],
+      ...data,
+    },
+  }
+}
+
+export async function proposeFromAgent(
+  swarm: Swarm,
+  {
+    agentId = "builder",
+    definition = swarm.activeRevision().definition,
+    addedAgentHeads = {},
+  }: {
+    agentId?: string
+    definition?: SwarmDefinition
+    addedAgentHeads?: Record<string, string>
+  } = {},
+): Promise<SwarmProposal> {
+  const input = swarm.appendInput(userMessage(agentId, "Propose this Swarm Definition.", {
+    proposalDefinition: definition,
+    proposalAddedAgentHeads: addedAgentHeads,
+  }))
+  const result = await swarm.runAgentTurn({ agentId, inputEventId: input.id })
+  const event = swarm.ledger.all().findLast((candidate) =>
+    candidate.type === "swarm.revision.proposed" && candidate.causation.includes(result.turnEvent.id),
+  )
+  const proposalId = (event?.data as { proposalId?: unknown } | undefined)?.proposalId
+  if (typeof proposalId !== "string") throw new Error("Agent turn created no Swarm Proposal")
+  return swarm.proposal(proposalId)
 }
 
 export function workspaceSeed(initialContext: string): WorkspaceFiles {
@@ -150,33 +195,47 @@ function renderSwarm(swarm) {
 export interface RecordedRun {
   agentId: string
   context: ContextMessage[]
-  pluginCommands: HarnessPluginCommand[]
+  commands: HarnessCommand[]
   pluginWorkspaces: HarnessPluginWorkspace[]
+  checkpoint?: HarnessCheckpoint
+  forkSession: boolean
 }
 
 class ScriptedHarnessAdapter implements HarnessAdapter {
   readonly id = "scripted"
   readonly runs: RecordedRun[] = []
+  #sessions = 0
 
-  async run({
-    turnId,
-    agentId,
-    scope,
-    workingDirectory,
-    inputEvents,
-    context,
-    pluginCommands,
-    pluginWorkspaces,
-    readWorkspace,
-  }: HarnessInput): Promise<HarnessResult> {
-    this.runs.push({ agentId, context, pluginCommands, pluginWorkspaces })
-    if (inputEvents[0]?.type === "plugin.workspace.improvement.requested") {
-      const input = inputEvents[0].data as { pluginId?: string; version?: string }
-      const plugin = pluginWorkspaces.find((workspace) => workspace.id === input.pluginId)
-      if (!plugin?.writable) throw new Error(`Plugin workspace is not writable: ${input.pluginId}`)
-      await writeFile(join(plugin.directory, "runtime.ts"), `export const version = ${JSON.stringify(input.version)}\n`)
+  async run(input: HarnessInput): Promise<HarnessResult> {
+    const { turnId, workingDirectory, context, commands, pluginWorkspaces, peerWorkspaces } = input
+    const inputEvents = contextInputEvents(context)
+    const event = inputEvents[0]
+    const data = (event?.data ?? {}) as {
+      command?: string
+      pluginId?: string
+      version?: string
+      forwardTo?: string
+      readPeer?: string
+      readPath?: string
+      proposalDefinition?: SwarmDefinition
+      proposalAddedAgentHeads?: Record<string, string>
     }
-    if (inputEvents[0]?.type === "agent.workspace.improvement.requested") {
+    const core = commands.find((command) => command.id === "corallum")!
+    const agentId = core.env!.CORALLUM_AGENT_ID!
+    this.runs.push({
+      agentId,
+      context,
+      commands,
+      pluginWorkspaces,
+      ...(input.checkpoint ? { checkpoint: input.checkpoint } : {}),
+      forkSession: input.forkSession,
+    })
+    if (data.command === "improve-plugin") {
+      const plugin = pluginWorkspaces.find((workspace) => workspace.id === data.pluginId)
+      if (!plugin?.writable) throw new Error(`Plugin workspace is not writable: ${data.pluginId}`)
+      await writeFile(join(plugin.directory, "runtime.ts"), `export const version = ${JSON.stringify(data.version)}\n`)
+    }
+    if (data.command === "improve-agent") {
       await appendFile(join(workingDirectory, "AGENTS.md"), "Evolved responsibility: verify the result.\n")
       await appendFile(join(workingDirectory, "context", "initial.md"), "Use evidence from prior Events.\n")
       const composerPath = join(workingDirectory, "context.ts")
@@ -184,43 +243,51 @@ class ScriptedHarnessAdapter implements HarnessAdapter {
       await writeFile(composerPath, composer.replace("composer:v1", "composer:v2"), "utf8")
     }
     await mkdir(join(workingDirectory, "memory"), { recursive: true })
-    if (inputEvents[0]?.type === "agent.workspace.continuation.requested") {
+    if (data.command === "continue-main") {
       await writeFile(join(workingDirectory, "memory", "main-tail.txt"), "continued on Main\n", "utf8")
     }
-    const identity = scope.kind === "fork" ? scope.forkId : "agent"
-    if (inputEvents[0]?.type !== "agent.workspace.continuation.requested") {
+    const identity = event?.scope.kind === "fork" ? event.scope.forkId : "agent"
+    if (event?.scope.kind === "fork" && data.command !== "continue-main") {
       await writeFile(join(workingDirectory, "memory", "last-run.txt"), `${identity}\n`, "utf8")
     }
-    const input = (inputEvents[0]?.data ?? {}) as {
-      forwardTo?: string
-      readPeer?: string
-      readPath?: string
-      proposalDefinition?: SwarmDefinition
+    const peer = data.readPeer ? peerWorkspaces.find((workspace) => workspace.agentId === data.readPeer) : undefined
+    const peerContent = peer ? await readFile(join(peer.directory, data.readPath ?? "AGENTS.md"), "utf8") : undefined
+    if (data.proposalDefinition) {
+      const proposal = join(dirname(core.env!.CORALLUM_ACTIONS_FILE!), "proposal.json")
+      await writeFile(proposal, JSON.stringify({
+        definition: data.proposalDefinition,
+        addedAgentHeads: data.proposalAddedAgentHeads ?? {},
+      }))
+      await execute(core.executable, [...(core.arguments ?? []), "propose", "--file", proposal], {
+        env: { ...process.env, ...core.env },
+      })
+    } else if (data.forwardTo) {
+      await execute(core.executable, [...(core.arguments ?? []),
+        "send",
+        "--to",
+        data.forwardTo,
+        "--text",
+        peerContent ?? `completed by ${agentId}`,
+      ], { env: { ...process.env, ...core.env } })
     }
-    const peerContent = input.readPeer ? await readWorkspace(input.readPeer, input.readPath ?? "AGENTS.md") : undefined
-    const events = input.proposalDefinition
-      ? [{ type: "swarm.revision.requested", data: { definition: input.proposalDefinition } }]
-      : [
-          {
-            type: "communication.sent",
-            data: {
-              from: `agent/${agentId}`,
-              to: input.forwardTo ? [input.forwardTo] : [],
-              content: [{ type: "text", text: peerContent ?? `completed by ${agentId}` }],
-            },
-          },
-        ]
+    const sessionId = input.checkpoint && !input.forkSession
+      ? input.checkpoint.sessionId
+      : `session-${++this.#sessions}`
     return {
       outcome: "completed",
-      events,
-      trajectory: {
-        harness: this.id,
-        sessionRef: `session/${identity}`,
-        range: { from: `${turnId}/start`, to: `${turnId}/end` },
-        digest: `trajectory/${turnId}`,
-      },
+      checkpoint: { harness: this.id, sessionId, turnId },
     }
   }
+}
+
+function contextInputEvents(context: ContextMessage[]): Array<{ scope: { kind: "active" } | { kind: "fork"; forkId: string }; data: unknown }> {
+  for (const message of context.toReversed()) {
+    try {
+      const value = JSON.parse(message.content)
+      if (Array.isArray(value)) return value
+    } catch {}
+  }
+  throw new Error("Scripted Harness received no input Events")
 }
 
 export function contextText(run: RecordedRun): string {

@@ -1,5 +1,7 @@
 import { contentId, digest, immutable } from "../canonical.ts"
+import type { SendAction } from "../agent/actions.ts"
 import type { AgentPluginAccess, AgentRuntime, AgentTurnResult } from "../agent/runtime.ts"
+import type { HarnessCheckpoint } from "../../harness/adapter.ts"
 import type { EventDraft, Ledger, LedgerEvent } from "../ledger/ledger.ts"
 import { activeScope, forkScope } from "../ledger/ledger.ts"
 import type { SwarmDefinition } from "./definition.ts"
@@ -28,7 +30,7 @@ interface ProposalInput {
 }
 
 interface AppendInput {
-  type: string
+  type: "communication.sent"
   actor: string
   data?: unknown
   schema?: string
@@ -39,6 +41,16 @@ export interface PluginEnvironment {
   env: Record<string, string>
 }
 
+export interface SwarmTurnResult extends AgentTurnResult {
+  outputEvents: LedgerEvent[]
+}
+
+interface HarnessState {
+  checkpoint: HarnessCheckpoint | null
+  workspaceCommit: string
+  forkNext: boolean
+}
+
 export class Swarm {
   #revisions = new Map<string, SwarmRevision>()
   #proposals = new Map<string, SwarmProposal>()
@@ -46,6 +58,8 @@ export class Swarm {
   #agentHeads = new Map<string, string>()
   #pluginDraftHeads = new Map<string, string>()
   #pluginEnvironments = new Map<string, Record<string, string>>()
+  #mainHarness = new Map<string, HarnessState>()
+  #forkHarness = new Map<string, Map<string, HarnessState>>()
   #activeRevisionId: string | null = null
   #mainOperations: Promise<unknown> = Promise.resolve()
   #forkOperations = new Map<string, Promise<unknown>>()
@@ -125,6 +139,9 @@ export class Swarm {
     this.#revisions.set(id, revision)
     this.#activeRevisionId = id
     for (const [agentId, head] of Object.entries(agentHeads)) this.#agentHeads.set(agentId, head)
+    for (const [agentId, head] of Object.entries(agentHeads)) {
+      this.#mainHarness.set(agentId, { checkpoint: null, workspaceCommit: head, forkNext: false })
+    }
     for (const plugin of checkedDefinition.plugins) this.#pluginDraftHeads.set(plugin.id, plugin.commit)
     return revision
   }
@@ -147,6 +164,8 @@ export class Swarm {
   }
 
   appendInput({ type, actor, data, schema }: AppendInput): LedgerEvent {
+    if (type !== "communication.sent") throw new Error("Swarm input must be communication.sent")
+    if (actor.startsWith("agent/")) throw new Error("Agent communication must use corallum send")
     const revision = this.activeRevision()
     return this.ledger.append({
       type,
@@ -159,8 +178,11 @@ export class Swarm {
   }
 
   ingest(draft: EventDraft): LedgerEvent {
+    if (draft.type !== "communication.sent") throw new Error("Plugin ingress must be communication.sent")
+    if (!isPluginCommunication(draft.data)) throw new Error("Plugin ingress must identify its source Plugin")
+    if (draft.actor.startsWith("agent/")) throw new Error("Agent communication must use corallum send")
     let data = structuredClone(draft.data ?? null)
-    if (draft.type === "communication.sent" && isPluginCommunication(data)) {
+    if (isPluginCommunication(data)) {
       const targets = this.activeRevision().definition.pluginIngress.filter(
         (binding) => binding.plugin === data.source.plugin,
       ).map((binding) => `agent/${binding.ingressTo}`)
@@ -178,19 +200,19 @@ export class Swarm {
     })
   }
 
-  async runAgentTurn(input: { agentId: string; inputEventId: string }): Promise<AgentTurnResult> {
+  async runAgentTurn(input: { agentId: string; inputEventId: string }): Promise<SwarmTurnResult> {
     return this.#withMain(() => this.#runAgentTurn(input))
   }
 
-  async dispatch(inputEventId: string): Promise<AgentTurnResult[]> {
+  async dispatch(inputEventId: string): Promise<SwarmTurnResult[]> {
     return this.#withMain(() => this.#dispatch(inputEventId))
   }
 
-  async #dispatch(inputEventId: string): Promise<AgentTurnResult[]> {
+  async #dispatch(inputEventId: string): Promise<SwarmTurnResult[]> {
     const input = this.ledger.get(inputEventId)
     if (input.scope.kind !== "active") throw new Error("Main dispatch requires an active-scoped Event")
     const queue = [input]
-    const turns: AgentTurnResult[] = []
+    const turns: SwarmTurnResult[] = []
     while (queue.length > 0) {
       const event = queue.shift()!
       for (const agentId of communicationTargets(this.activeRevision().definition, event)) {
@@ -203,7 +225,7 @@ export class Swarm {
     return turns
   }
 
-  async #runAgentTurn({ agentId, inputEventId }: { agentId: string; inputEventId: string }): Promise<AgentTurnResult> {
+  async #runAgentTurn({ agentId, inputEventId }: { agentId: string; inputEventId: string }): Promise<SwarmTurnResult> {
     const revision = this.activeRevision()
     const agent = findAgent(revision.definition, agentId)
     const input = this.ledger.get(inputEventId)
@@ -213,13 +235,22 @@ export class Swarm {
     }
     const scope = activeScope()
     const proposalPluginFrontier = this.ledger.head().seq
+    const baseCommit = this.agentHead(agentId)
+    const harness = this.#mainHarness.get(agentId) ?? {
+      checkpoint: null,
+      workspaceCommit: baseCommit,
+      forkNext: false,
+    }
+    const checkpoint = harness.checkpoint?.harness === agent.harness ? harness.checkpoint : null
     const result = await this.agentRuntime.runTurn({
       agent,
-      baseCommit: this.agentHead(agentId),
+      baseCommit,
       scope,
       inputEvents: [input],
       workspaceHeads: Object.fromEntries(this.#agentHeads),
       pluginAccess: this.#pluginAccess(revision.definition, agentId, true),
+      ...(checkpoint ? { checkpoint } : {}),
+      forkSession: Boolean(checkpoint) && (harness.forkNext || harness.workspaceCommit !== baseCommit),
       runtimeContext: {
         swarm: projectAgentSwarmView(
           revision.definition,
@@ -232,25 +263,32 @@ export class Swarm {
       },
     })
     this.#agentHeads.set(agentId, result.workspaceCommit.commit)
+    this.#mainHarness.set(agentId, {
+      checkpoint: result.checkpoint,
+      workspaceCommit: baseCommit,
+      forkNext: result.workspaceCommit.commit !== baseCommit,
+    })
     for (const [pluginId, pluginCommit] of Object.entries(result.pluginWorkspaceCommits)) {
       this.#pluginDraftHeads.set(pluginId, pluginCommit.commit)
     }
-    for (const event of result.outputEvents) {
-      if (event.type !== "swarm.revision.requested") continue
-      const request = revisionRequest(event.data)
+    const outputEvents: LedgerEvent[] = []
+    let proposed = false
+    for (const action of result.actions) {
+      if (action.type === "send") {
+        outputEvents.push(this.#recordAgentCommunication(revision.definition, agentId, scope, action, result.turnEvent.id))
+        continue
+      }
+      if (proposed) throw new Error("An Agent turn may create only one Swarm Proposal")
+      proposed = true
       await this.#propose({
         authoredBy: agentId,
-        definition: request.definition,
-        addedAgentHeads: request.addedAgentHeads,
-        reasonEventIds: [event.id],
+        definition: action.definition,
+        addedAgentHeads: action.addedAgentHeads,
+        reasonEventIds: [result.turnEvent.id],
         pluginEvidenceFrontier: proposalPluginFrontier,
       })
     }
-    return result
-  }
-
-  async propose(input: ProposalInput): Promise<SwarmProposal> {
-    return this.#withMain(() => this.#propose(input))
+    return { ...result, outputEvents }
   }
 
   async #propose({
@@ -336,6 +374,7 @@ export class Swarm {
     })
     const proposal = immutable<SwarmProposal>({ id, ...body, eventId: event.id })
     this.#proposals.set(id, proposal)
+    this.#freezeMainHarness()
     return proposal
   }
 
@@ -374,6 +413,7 @@ export class Swarm {
       createdEventId: event.id,
     }
     this.#forks.set(id, fork)
+    this.#forkHarness.set(id, this.#sourceHarness(source))
     return snapshotFork(fork)
   }
 
@@ -517,6 +557,18 @@ export class Swarm {
     this.#activeRevisionId = id
     this.#agentHeads.clear()
     for (const [agentId, head] of Object.entries(nextHeads)) this.#agentHeads.set(agentId, head)
+    const selectedHarness = this.#forkHarness.get(fork.id) ?? new Map<string, HarnessState>()
+    this.#mainHarness = new Map(
+      fork.definition.agents.map((agent) => {
+        const state = selectedHarness.get(agent.id)
+        return [
+          agent.id,
+          state
+            ? { ...state, forkNext: Boolean(state.checkpoint) }
+            : { checkpoint: null, workspaceCommit: nextHeads[agent.id]!, forkNext: false },
+        ]
+      }),
+    )
     for (const plugin of fork.definition.plugins) {
       if (!this.#pluginDraftHeads.has(plugin.id)) this.#pluginDraftHeads.set(plugin.id, plugin.commit)
     }
@@ -579,13 +631,23 @@ export class Swarm {
         deliveries += 1
         if (deliveries > 100) throw new Error("Fork exceeded 100 Agent deliveries")
         const agent = findAgent(fork.definition, agentId)
+        const baseCommit = fork.agentHeads[agent.id]!
+        const states = this.#forkHarness.get(fork.id)!
+        const harness = states.get(agent.id) ?? {
+          checkpoint: null,
+          workspaceCommit: baseCommit,
+          forkNext: false,
+        }
+        const checkpoint = harness.checkpoint?.harness === agent.harness ? harness.checkpoint : null
         const result = await this.agentRuntime.runTurn({
           agent,
-          baseCommit: fork.agentHeads[agent.id]!,
+          baseCommit,
           scope: fork.scope,
           inputEvents: [event],
           workspaceHeads: { ...fork.agentHeads },
           pluginAccess: this.#pluginAccess({ ...fork.definition, plugins: fork.pluginBindings }, agent.id, false),
+          ...(checkpoint ? { checkpoint } : {}),
+          forkSession: Boolean(checkpoint) && (harness.forkNext || harness.workspaceCommit !== baseCommit),
           runtimeContext: {
             swarm: projectAgentSwarmView(
               fork.definition,
@@ -597,9 +659,92 @@ export class Swarm {
           },
         })
         fork.agentHeads[agent.id] = result.workspaceCommit.commit
-        queue.push(...result.outputEvents)
+        states.set(agent.id, {
+          checkpoint: result.checkpoint,
+          workspaceCommit: baseCommit,
+          forkNext: result.workspaceCommit.commit !== baseCommit,
+        })
+        for (const action of result.actions) {
+          if (action.type === "propose") throw new Error("A Fork may not create another Swarm Proposal")
+          queue.push(this.#recordAgentCommunication(fork.definition, agentId, fork.scope, action, result.turnEvent.id))
+        }
       }
     }
+  }
+
+  #recordAgentCommunication(
+    definition: SwarmDefinition,
+    agentId: string,
+    scope: ReturnType<typeof activeScope> | ReturnType<typeof forkScope>,
+    action: SendAction,
+    turnEventId: string,
+  ): LedgerEvent {
+    const recipients = action.to.map((target) => target.startsWith("agent/") ? target : `agent/${target}`)
+    for (const recipient of recipients) {
+      const target = recipient.slice("agent/".length)
+      findAgent(definition, target)
+      if (!definition.routes.some((route) => route.from === agentId && route.to === target)) {
+        throw new Error(`Communication route is not defined: ${agentId} -> ${target}`)
+      }
+    }
+    return this.ledger.append({
+      type: "communication.sent",
+      actor: `agent/${agentId}`,
+      scope,
+      causation: [turnEventId],
+      data: {
+        from: `agent/${agentId}`,
+        to: recipients,
+        content: [{ type: "text", text: action.text }],
+      },
+    })
+  }
+
+  #freezeMainHarness(): void {
+    for (const [agentId, state] of this.#mainHarness) {
+      this.#mainHarness.set(agentId, { ...state, forkNext: Boolean(state.checkpoint) })
+    }
+  }
+
+  #sourceHarness(source: ForkSource): Map<string, HarnessState> {
+    const states = new Map<string, HarnessState>()
+    for (const [agentId, head] of Object.entries(source.agentHeads)) {
+      const checkpoint = this.#sourceCheckpoint(source, agentId)
+      states.set(agentId, {
+        checkpoint,
+        workspaceCommit: checkpoint ? this.#checkpointWorkspace(checkpoint) : head,
+        forkNext: Boolean(checkpoint),
+      })
+    }
+    return states
+  }
+
+  #sourceCheckpoint(source: ForkSource, agentId: string): HarnessCheckpoint | null {
+    const revision = source.kind === "revision" ? this.#revisions.get(source.id) : undefined
+    const scope = revision?.sourceForkId ? forkScope(revision.sourceForkId) : activeScope()
+    const frontier = revision?.sourceForkId
+      ? this.#lastForkEvent(revision.sourceForkId).seq
+      : source.ledgerFrontier
+    const event = this.ledger.all().findLast((candidate) => {
+      if (candidate.seq > frontier || candidate.type !== "agent.turn.recorded") return false
+      if (candidate.scope.kind !== scope.kind) return false
+      if (scope.kind === "fork" && candidate.scope.kind === "fork" && candidate.scope.forkId !== scope.forkId) return false
+      return (candidate.data as { agentId?: unknown }).agentId === agentId
+    })
+    const trajectory = (event?.data as { trajectory?: unknown } | undefined)?.trajectory
+    return isHarnessCheckpoint(trajectory) ? trajectory : null
+  }
+
+  #checkpointWorkspace(checkpoint: HarnessCheckpoint): string {
+    const event = this.ledger.all().findLast((candidate) => {
+      if (candidate.type !== "agent.turn.recorded") return false
+      const trajectory = (candidate.data as { trajectory?: unknown }).trajectory
+      return isHarnessCheckpoint(trajectory) &&
+        trajectory.sessionId === checkpoint.sessionId && trajectory.turnId === checkpoint.turnId
+    })
+    const commit = (event?.data as { inputWorkspaceCommit?: unknown } | undefined)?.inputWorkspaceCommit
+    if (typeof commit !== "string") throw new Error("Harness checkpoint has no Agent turn")
+    return commit
   }
 
   #mutableFork(id: string): MutableFork {
@@ -760,14 +905,10 @@ function communicationTargets(definition: SwarmDefinition, event: LedgerEvent): 
   return targets
 }
 
-function revisionRequest(data: unknown): { definition: SwarmDefinition; addedAgentHeads: Record<string, string> } {
-  if (!data || typeof data !== "object") throw new Error("Swarm revision request data is required")
-  const request = data as { definition?: unknown; addedAgentHeads?: unknown }
-  if (request.addedAgentHeads !== undefined && (!request.addedAgentHeads || typeof request.addedAgentHeads !== "object")) {
-    throw new Error("Swarm revision request addedAgentHeads must be an object")
-  }
-  return {
-    definition: validateDefinition(request.definition),
-    addedAgentHeads: (request.addedAgentHeads ?? {}) as Record<string, string>,
-  }
+function isHarnessCheckpoint(value: unknown): value is HarnessCheckpoint {
+  if (!value || typeof value !== "object") return false
+  const checkpoint = value as Partial<HarnessCheckpoint>
+  return typeof checkpoint.harness === "string" &&
+    typeof checkpoint.sessionId === "string" &&
+    typeof checkpoint.turnId === "string"
 }

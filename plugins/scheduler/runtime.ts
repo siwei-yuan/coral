@@ -3,7 +3,7 @@ import { join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { EventDraft } from "../../src/core/ledger/ledger.ts"
 import { activeScope } from "../../src/core/ledger/ledger.ts"
-import type { PluginExecutable } from "../../src/harness/adapter.ts"
+import type { PluginExecutable } from "../../src/core/plugin/executable.ts"
 
 export interface Schedule {
   agentId: string
@@ -25,7 +25,7 @@ export class SchedulerRuntime {
     return {
       id: this.id,
       executable: fileURLToPath(new URL("bin/scheduler.mjs", import.meta.url)),
-      env: { CORALLUM_PLUGIN_STATE: this.stateRoot },
+      env: { CORALLUM_SCHEDULER_STATE: this.stateRoot },
     }
   }
 

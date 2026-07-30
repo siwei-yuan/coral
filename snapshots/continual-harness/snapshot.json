@@ -40,7 +40,7 @@
           }
         ],
         "expect": {
-          "eventType": "communication.sent"
+          "eventType": "agent.turn.recorded"
         }
       }
     ]

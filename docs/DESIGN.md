@@ -4,9 +4,14 @@
 
 1. An Agent evolves itself by changing and committing its own workspace.
 2. A Swarm evolves as a whole through immutable Revision snapshots.
-3. Every workspace and Swarm evolution remains traceable through Git and the Ledger.
+3. Every evolution is reconstructable from Git and the Event Ledger.
 
 Only Main and Forks are running states. A Revision is a point-in-time snapshot.
+These principles meet at an Agent checkpoint: a workspace commit identifies the
+Agent's editable self, while `agent.turn.recorded` identifies its resumable
+Harness session, checkpoint, and exact Corallum turn marker. A Revision or
+Proposal frontier therefore locates both without copying native trajectories
+into the Ledger.
 
 ## Center and layers
 
@@ -59,8 +64,8 @@ view/default     -> Ledger projection + Human commands
 
 Workspace never imports Swarm. Agent Runtime knows no Proposal, Revision, or
 Fork state machine. Swarm never performs Git operations directly. Harness
-Adapters receive already-composed context plus a read-only function for exact
-Agent workspace snapshots; context composition remains owned by the Agent.
+Adapters receive already-composed context plus concrete checkouts for exact
+peer workspace heads; context composition remains owned by the Agent.
 
 ## Workspace ownership
 
@@ -77,6 +82,44 @@ That commit contains the initial Agent files and is recorded as
 `agent.workspace.initialized`; it is not attributed to an Agent turn. Bootstrap
 Agents and Agents added by a Proposal must reference such an initial commit.
 
+## Harness sessions and checkpoints
+
+Each Agent workspace lineage has a corresponding native Harness session
+lineage. A normal turn resumes the current session. When the Agent produces a
+new workspace commit, the next turn forks the completed Harness checkpoint and
+binds the new branch to that commit. An unchanged workspace does not create a
+new session branch.
+
+Every `agent.turn.recorded` contains the Corallum turn ID and a `trajectory`
+reference with the Harness, resumable session ID, and trajectory turn marker.
+Codex supplies a native turn ID; Claude Code and Pi use the Corallum turn marker
+embedded in their native session history. The Event also records the input and
+output workspace commits. The pair is sufficient to project Agent state:
+
+```text
+Agent state = workspace commit + Harness checkpoint
+```
+
+A session also advances on turns that do not change the workspace. Therefore a
+workspace commit alone is not a historical checkpoint. A Revision or Proposal
+uses its Ledger frontier to select the last visible `agent.turn.recorded` for
+each Agent. Before Main continues beyond such a frontier, its next turn lazily
+forks that checkpoint. This freezes the source without making an empty model
+call or rebuilding context from scratch.
+
+A Swarm Fork starts each Agent from the source workspace commit and source
+Harness checkpoint. F1/F2/F3 fork those same checkpoints into independent
+native sessions. The selected Fork's sessions and workspaces become Main;
+activation never cold-starts them. Harness sessions are operational storage,
+not Ledger Events or Revision fields. Their exact checkpoints are recoverable
+through the turn Events and snapshot frontier.
+
+The Adapter is the complete Harness driver; there is no separate Driver,
+Daemon, capability graph, or Core session history. Codex uses App Server
+threads, Claude Code uses resumable/forked sessions, and Pi uses its RPC/session
+tree. Native tools, compaction, token usage, and internal messages remain owned
+by those Harnesses.
+
 ## Main, Revision snapshots, and Forks
 
 Main is the one live Swarm. Its Agent workspace heads may advance after its
@@ -88,9 +131,10 @@ changes or own later commits.
 
 `SwarmDefinition` is the Agent graph; there is no second `GraphRevision` type.
 Each Route is an allowed directed communication edge between two Agents. An
-Agent emits `communication.sent` with recipients; Swarm validates each internal
-recipient against the active edge and performs delivery. Main and Forks use the
-same rule. Arbitrary application Event types are not part of this Core graph.
+Agent invokes `corallum send`; Swarm validates each internal recipient against
+the active edge, records `communication.sent`, and performs delivery. Main and
+Forks use the same rule. Arbitrary application Event types are not part of this
+Core graph.
 
 Adding or removing an Agent means proposing another complete Definition:
 
@@ -138,23 +182,37 @@ Git and the Ledger but are not part of the new Main.
 An Agent may author a modified complete `SwarmDefinition`, including Agent
 composition, Harness bindings, routes, tests, and Plugin bindings. This is
 proposal authority, never authority to mutate the active Definition in place.
-It emits `swarm.revision.requested`; after its turn and workspace commit finish,
-Main creates the Proposal with that request Event as its cause. This creates no
-Revision. In the current design only Human approval creates and activates a new
-Revision.
+It invokes the native `corallum propose` command. After the Harness turn and
+workspace commits finish, Swarm validates the complete Definition, heads,
+Plugin pins, and tests, then creates `swarm.revision.proposed` with the turn
+Event as its cause. There is no intermediate request Event. Only Human approval
+creates and activates a new Revision.
 
-The complete Swarm lifecycle uses only these Events:
+The complete Core Event model and its only writers are:
 
-- `swarm.revision.requested`: optional Agent intent.
-- `swarm.revision.proposed`: complete proposed Definition, Agent heads, tests,
-  workspace evidence, and causal Events.
-- `swarm.fork.created`: Human-created isolated state from a Revision or Proposal.
-- `swarm.decision.recorded`: Human approval or denial of an exact Fork frontier.
-- `swarm.revision.activated`: complete immutable Revision snapshot after a
-  successful approval.
+- `communication.sent`: Plugin/user ingress through Swarm, or an Agent `send`
+  action materialized by Swarm after its turn.
+- `agent.workspace.initialized`, `agent.workspace.committed`, and
+  `agent.workspace.reapplied`: Workspace Runtime, Agent Runtime, and activation,
+  respectively.
+- `plugin.workspace.initialized` and `plugin.workspace.committed`: Plugin Git
+  evolution recorded by Plugin Workspace Runtime.
+- `agent.turn.recorded`: one Core-recorded logical Harness turn and its exact
+  trajectory checkpoint; it is never emitted by the Agent or Harness.
+- `swarm.revision.proposed`: Swarm materializes a validated complete Proposal
+  from an Agent `propose` action.
+- `swarm.fork.created`: a Human-created isolated state from a Revision or
+  Proposal, recorded by Swarm.
+- `swarm.decision.recorded`: Swarm records a Human approval or denial of an
+  exact Fork frontier.
+- `swarm.revision.activated`: the complete immutable Revision snapshot after a
+  successful approval, recorded by Swarm.
 
-There is deliberately no `swarm.fork.evaluated`, `swarm.fork.selected`, or
-pre-approval `swarm.revision.frozen` Event.
+Screen activity and Scheduler firings are typed content inside
+`communication.sent`, not new top-level Event types. Arbitrary
+`*.requested` application Events are not Core primitives. There is deliberately
+no `swarm.revision.requested`, `swarm.fork.evaluated`,
+`swarm.fork.selected`, or pre-approval `swarm.revision.frozen` Event.
 
 An Agent changes its own responsibility, context, memory, skills, or context
 composition by editing its workspace. The resulting commit affects its next
@@ -203,6 +261,16 @@ foreground App session through the `screen` CLI. Agent output takes the reverse
 path directly through a Plugin CLI and the Plugin-owned runtime. It does not
 become an outbound Ledger Event. No Plugin copies files into or initializes an
 Agent workspace.
+
+Corallum itself exposes two Harness-neutral shell commands. `corallum send`
+records an Agent's request to communicate along a declared Route; `corallum
+propose` submits a complete candidate Definition. During the turn these
+commands append only to a private turn-scoped action file. After the Harness
+returns, Core commits workspace changes, validates each action, and creates the
+authoritative Ledger Event. An Agent cannot choose Event IDs, actors, scope,
+causation, workspace Events, turn Events, or activation Events. Harness
+Adapters therefore return only outcome and trajectory checkpoint; there is no
+generic `events[]` output contract.
 
 Each `pluginIngress` entry is one allowed Plugin-to-Agent edge. A Plugin may
 have multiple entries. An inbound Event with no recipients is routed to all of
@@ -279,11 +347,11 @@ the first version: further Plugin edits require another Main draft commit and a
 later Proposal. Human approval activates the selected Swarm Revision and all of
 its Plugin pins together. There is no independent Plugin activation Event.
 
-A Proposal uses literal commit IDs only. A turn cannot edit a Plugin and refer
-to that newly created commit in its own `swarm.revision.requested` Event: the
-commit does not become proposal-visible until the turn finishes. The next turn
-sees the new draft head and may pin it. This keeps the protocol free of symbolic
-`latest` or `draft` references.
+A Proposal uses literal commit IDs only. A turn cannot edit a Plugin and pin
+that newly created commit in the same Proposal action: the commit does not
+become proposal-visible until the turn finishes. The next turn sees the new
+draft head and may pin it. This keeps the protocol free of symbolic `latest` or
+`draft` references.
 
 Commits skipped by a Proposal, such as `v2`, remain ordinary auditable Git
 history. Commits made after a Proposal remain draft candidates for a later
@@ -316,10 +384,11 @@ objects without changing their commit IDs.
 The Snapshot as a whole therefore initializes Agent roles and context even
 though those fields are not duplicated inside `SwarmDefinition`.
 
-A Snapshot intentionally excludes live Harness sessions, runtime queues,
-secrets, Plugin connections, and low-level trajectories. It is a reusable
-starting state, not a replacement for the Ledger or an exact forensic archive
-of a running instance.
+A portable Snapshot intentionally excludes live Harness sessions, runtime
+queues, secrets, Plugin connections, and low-level trajectories. An installed
+running Swarm can still reconstruct Revision/Proposal checkpoints from its
+Ledger and native Harness storage. The portable Snapshot is a reusable starting
+state, not a replacement for that Ledger or an exact forensic archive.
 
 Snapshot import now resolves exact Plugin code. A generic deployment runner is
 still separate work: it must start each external Plugin runtime from the same
