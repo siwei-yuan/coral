@@ -53,7 +53,11 @@ export { SnapshotStore } from "./snapshots/store.ts"
 export { DefaultView, projectLedger, renderDefaultView, renderExtensionPage } from "./view/default/index.ts"
 export type { ViewExtension, ViewExtensionLink } from "./view/extension.ts"
 export type {
+  AgentCheckpointView,
+  AgentStateView,
   DefaultViewModel,
+  EventReferenceView,
+  EvolutionNodeView,
   DefaultViewServer,
   ForkTestView,
   ForkView,
@@ -61,4 +65,5 @@ export type {
   PluginView,
   ProposalView,
   RevisionView,
+  TurnView,
 } from "./view/default/index.ts"

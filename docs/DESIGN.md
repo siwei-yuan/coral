@@ -301,9 +301,12 @@ deny a Fork frontier. Core validates the command and records its result.
 
 The default implementation lives in `src/view/default`. It has no database or
 private lifecycle model. Replaying the Ledger reconstructs active topology,
-Revision and Proposal history, Fork heads and evidence, derived test results,
-collaboration, and Human Decisions. Its local HTTP surface renders an Agent
-canvas, evolution path, Fork comparison, and Ledger timeline.
+Revision and Proposal history, Fork heads and evidence, Agent Harness
+checkpoints, derived test results, collaboration, and Human Decisions. Its
+local HTTP surface renders a pannable and zoomable Git-style evolution tree,
+Agent state, causal turns, Fork comparison, and the raw Ledger. Node details
+remain collapsed until selected; the canvas never invents evaluation state or
+decorative data.
 
 The default View understands Plugins only through their Definition and inbound
 Communication Events. It renders ingress routing and CLI exposure without any

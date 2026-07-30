@@ -111,13 +111,18 @@ export interface DefaultViewServer {
 
 export { projectLedger, renderDefaultView, renderExtensionPage }
 export type {
+  AgentCheckpointView,
+  AgentStateView,
   DefaultViewModel,
+  EventReferenceView,
+  EvolutionNodeView,
   ForkTestView,
   ForkView,
   PluginEventView,
   PluginView,
   ProposalView,
   RevisionView,
+  TurnView,
 } from "./project.ts"
 
 async function readForm(request: IncomingMessage): Promise<URLSearchParams> {
@@ -139,7 +144,7 @@ function frontier(form: URLSearchParams): number {
 }
 
 function html(response: ServerResponse, status: number, body: string): void {
-  response.writeHead(status, { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'none'; img-src data:; style-src 'unsafe-inline'; form-action 'self'" }).end(body)
+  response.writeHead(status, { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; form-action 'self'" }).end(body)
 }
 
 function extensionPath(path: string): { plugin: string; action: string | null } | null {
