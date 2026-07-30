@@ -114,9 +114,11 @@ activation never cold-starts them. Harness sessions are operational storage,
 not Ledger Events or Revision fields. Their exact checkpoints are recoverable
 through the turn Events and snapshot frontier.
 
-The Adapter is the complete Harness driver; there is no separate Driver,
-Daemon, capability graph, or Core session history. Codex uses App Server
-threads, Claude Code uses resumable/forked sessions, and Pi uses its RPC/session
+The Adapter is the complete Harness driver; there is no separate Core session
+history or capability graph. When a Harness exposes a daemon, its lifetime
+belongs to deployment rather than to an Agent turn. One Codex App Server serves
+the deployment while each Agent keeps an independent resumable or forked
+thread. Claude Code uses resumable/forked sessions, and Pi uses its RPC/session
 tree. Native tools, compaction, token usage, and internal messages remain owned
 by those Harnesses.
 
@@ -290,9 +292,11 @@ Each `pluginIngress` entry is one allowed Plugin-to-Agent edge. A Plugin may
 have multiple entries. An inbound Event with no recipients is routed to all of
 that Plugin's ingress targets; explicit recipients must be a subset of those
 targets. This is not a bidirectional channel. `plugins[].exposedTo` separately
-says which Agents can see that Plugin's CLI. The Harness command environment
-includes the current Agent ID and binding mode. Forks replace live bindings
-with mock mode; actual runtime isolation remains part of the deferred
+says which Agents can see that Plugin's CLI. Each CLI is exposed through a
+turn-scoped command wrapper that binds only that Plugin's operational
+environment, including the current Agent ID and binding mode. Environments from
+different commands never merge into the Harness process. Forks replace live
+bindings with mock mode; actual runtime isolation remains part of the deferred
 Agent-plus-workspace sandbox.
 
 Scheduler is a normal Plugin, not a Core service. Its CLI lets an Agent set,

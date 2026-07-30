@@ -1,19 +1,25 @@
 import assert from "node:assert/strict"
+import { execFile as execFileCallback } from "node:child_process"
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 import type { TestContext } from "node:test"
+import { promisify } from "node:util"
 import {
   ClaudeCodeHarnessAdapter,
   CodexHarnessAdapter,
   PiHarnessAdapter,
   type HarnessInput,
 } from "../src/index.ts"
+import { prepareCommands } from "../src/harness/io.ts"
+
+const execFile = promisify(execFileCallback)
 
 test("Codex Adapter starts, resumes, and forks exact native turns", async (t) => {
   const { root, executable } = await fakeExecutable(t, "codex", `
 import readline from "node:readline"
+let turns = 0
 const lines = readline.createInterface({ input: process.stdin })
 lines.on("line", (line) => {
   const message = JSON.parse(line)
@@ -23,20 +29,36 @@ lines.on("line", (line) => {
   if (message.method === "thread/resume") respond(message.id, { thread: { id: message.params.threadId } })
   if (message.method === "thread/fork") respond(message.id, { thread: { id: "codex-fork" } })
   if (message.method === "turn/start") {
-    respond(message.id, { turn: { id: "codex-turn" } })
-    send({ method: "turn/completed", params: { turn: { id: "codex-turn", status: "completed" } } })
+    const id = "codex-turn-" + ++turns
+    respond(message.id, { turn: { id } })
+    send({ method: "turn/completed", params: { turn: { id, status: "completed" } } })
   }
 })
 function respond(id, result) { send({ id, result }) }
 function send(value) { process.stdout.write(JSON.stringify(value) + "\\n") }
 `)
   const adapter = new CodexHarnessAdapter(executable)
+  t.after(() => adapter.stop())
   const started = await adapter.run(harnessInput(root))
-  assert.deepEqual(started.checkpoint, { harness: "codex", sessionId: "codex-new", turnId: "codex-turn" })
+  assert.deepEqual(started.checkpoint, { harness: "codex", sessionId: "codex-new", turnId: "codex-turn-1" })
   const resumed = await adapter.run(harnessInput(root, started.checkpoint!, false))
   assert.equal(resumed.checkpoint?.sessionId, "codex-new")
+  assert.equal(resumed.checkpoint?.turnId, "codex-turn-2")
   const forked = await adapter.run(harnessInput(root, resumed.checkpoint!, true))
   assert.equal(forked.checkpoint?.sessionId, "codex-fork")
+  assert.equal(forked.checkpoint?.turnId, "codex-turn-3")
+})
+
+test("Harness commands keep each Plugin environment scoped to its CLI", async (t) => {
+  const prepared = await prepareCommands([
+    stateCommand("chat", "/state/chat"),
+    stateCommand("scheduler", "/state/scheduler"),
+  ])
+  t.after(() => prepared.cleanup())
+
+  const [chat, scheduler] = prepared.commands
+  assert.equal((await execFile(chat!.executable)).stdout, "/state/chat")
+  assert.equal((await execFile(scheduler!.executable)).stdout, "/state/scheduler")
 })
 
 test("Claude Code Adapter preserves or forks the supplied session", async (t) => {
@@ -93,6 +115,16 @@ function harnessInput(
     peerWorkspaces: [],
     ...(checkpoint ? { checkpoint } : {}),
     forkSession,
+  }
+}
+
+function stateCommand(id: string, state: string) {
+  return {
+    id,
+    executable: process.execPath,
+    arguments: ["-e", "process.stdout.write(process.env.CORALLUM_PLUGIN_STATE ?? '')"],
+    usage: "",
+    env: { CORALLUM_PLUGIN_STATE: state },
   }
 }
 

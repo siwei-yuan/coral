@@ -1,4 +1,7 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process"
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import type { HarnessCommand, HarnessInput } from "./adapter.ts"
 
 export class JsonLineDecoder {
@@ -21,17 +24,6 @@ export class JsonLineDecoder {
   }
 }
 
-export function commandEnvironment(commands: HarnessCommand[]): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env }
-  for (const command of commands) {
-    for (const [key, value] of Object.entries(command.env ?? {})) {
-      if (env[key] !== undefined && env[key] !== value) throw new Error(`Harness command environment conflicts: ${key}`)
-      env[key] = value
-    }
-  }
-  return env
-}
-
 export function renderPrompt(input: HarnessInput): string {
   const messages = input.context.map((message) => `[${message.role}]\n${message.content}`).join("\n\n")
   const commands = input.commands.map((command) =>
@@ -52,10 +44,49 @@ export function renderPrompt(input: HarnessInput): string {
   ].join("\n\n")
 }
 
+export async function prepareCommands(commands: HarnessCommand[]): Promise<{
+  commands: HarnessCommand[]
+  cleanup(): Promise<void>
+}> {
+  const wrapped = commands.filter((command) => command.env && Object.keys(command.env).length > 0)
+  if (wrapped.length === 0) return { commands, cleanup: async () => {} }
+  for (const command of wrapped) {
+    for (const key of Object.keys(command.env!)) {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) throw new Error(`Invalid command environment key: ${key}`)
+    }
+  }
+  const root = await mkdtemp(join(tmpdir(), "corallum-commands-"))
+  try {
+    const prepared = await Promise.all(commands.map(async (command, index) => {
+      if (!command.env || Object.keys(command.env).length === 0) return command
+      const executable = join(root, String(index))
+      await writeFile(executable, [
+        "#!/bin/sh",
+        ...Object.entries(command.env).map(([key, value]) => `export ${key}=${shell(value)}`),
+        `exec ${[command.executable, ...(command.arguments ?? [])].map(shell).join(" ")} \"$@\"`,
+        "",
+      ].join("\n"))
+      await chmod(executable, 0o700)
+      return { id: command.id, executable, usage: command.usage }
+    }))
+    return {
+      commands: prepared,
+      cleanup: () => rm(root, { recursive: true, force: true }),
+    }
+  } catch (error) {
+    await rm(root, { recursive: true, force: true })
+    throw error
+  }
+}
+
 export function waitForExit(child: ChildProcessWithoutNullStreams): Promise<number> {
   if (child.exitCode !== null) return Promise.resolve(child.exitCode)
   return new Promise((resolve, reject) => {
     child.once("error", reject)
     child.once("close", (code) => resolve(code ?? 1))
   })
+}
+
+function shell(value: string): string {
+  return `'${value.replaceAll("'", `'\"'\"'`)}'`
 }

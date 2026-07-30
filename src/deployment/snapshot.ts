@@ -62,7 +62,7 @@ export async function deploySnapshot({
     await swarm.bootstrap({ definition: installed.definition, agentHeads: installed.agentHeads, human })
     await plugins.start()
   } catch (error) {
-    await plugins.stop()
+    await stopDeployment(plugins, adapters)
     throw error
   }
   const view = new DefaultView({ swarm, human, extensions: () => plugins.extensions() })
@@ -72,10 +72,18 @@ export async function deploySnapshot({
     swarm,
     view,
     settled: () => plugins.settled(),
-    stop: () => plugins.stop(),
+    stop: () => stopDeployment(plugins, adapters),
   }
 }
 
 function defaultAdapters(): HarnessAdapter[] {
   return [new CodexHarnessAdapter(), new ClaudeCodeHarnessAdapter(), new PiHarnessAdapter()]
+}
+
+async function stopDeployment(plugins: PluginRuntimeHost, adapters: HarnessAdapter[]): Promise<void> {
+  try {
+    await plugins.stop()
+  } finally {
+    await Promise.all(adapters.map((adapter) => adapter.stop?.()))
+  }
 }

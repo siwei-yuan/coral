@@ -47,4 +47,5 @@ export interface HarnessResult {
 export interface HarnessAdapter {
   readonly id: string
   run(input: HarnessInput): Promise<HarnessResult>
+  stop?(): Promise<void>
 }

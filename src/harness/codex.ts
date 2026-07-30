@@ -1,33 +1,46 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import type { HarnessAdapter, HarnessInput, HarnessResult } from "./adapter.ts"
-import { commandEnvironment, JsonLineDecoder, renderPrompt, waitForExit } from "./io.ts"
+import { JsonLineDecoder, prepareCommands, renderPrompt, waitForExit } from "./io.ts"
 
 interface PendingRequest {
   resolve(value: unknown): void
   reject(error: Error): void
 }
 
+interface NotificationWaiter {
+  method: string
+  predicate(params: unknown): boolean
+  resolve(params: unknown): void
+  reject(error: Error): void
+}
+
 export class CodexHarnessAdapter implements HarnessAdapter {
   readonly id = "codex"
   readonly executable: string
+  #client: Promise<CodexClient> | null = null
+  #threads = new Set<string>()
 
   constructor(executable = "codex") {
     this.executable = executable
   }
 
   async run(input: HarnessInput): Promise<HarnessResult> {
-    const client = new CodexClient(this.executable, commandEnvironment(input.commands))
+    const prepared = await prepareCommands(input.commands)
     try {
-      await client.initialize()
+      input = { ...input, commands: prepared.commands }
+      const client = await this.#connect()
       const thread = input.checkpoint
         ? input.forkSession
           ? await client.request("thread/fork", {
               threadId: input.checkpoint.sessionId,
               lastTurnId: input.checkpoint.turnId,
             })
-          : await client.request("thread/resume", { threadId: input.checkpoint.sessionId })
+          : this.#threads.has(input.checkpoint.sessionId)
+            ? { thread: { id: input.checkpoint.sessionId } }
+            : await client.request("thread/resume", { threadId: input.checkpoint.sessionId })
         : await client.request("thread/start", { cwd: input.workingDirectory })
       const threadId = readId(thread, "thread")
+      this.#threads.add(threadId)
       const started = await client.request("turn/start", {
         threadId,
         cwd: input.workingDirectory,
@@ -41,8 +54,35 @@ export class CodexHarnessAdapter implements HarnessAdapter {
         checkpoint: { harness: this.id, sessionId: threadId, turnId },
       }
     } finally {
-      await client.close()
+      await prepared.cleanup()
     }
+  }
+
+  async stop(): Promise<void> {
+    const client = this.#client
+    this.#client = null
+    this.#threads.clear()
+    if (client) await (await client).close()
+  }
+
+  #connect(): Promise<CodexClient> {
+    if (!this.#client) {
+      this.#client = (async () => {
+        const client = new CodexClient(this.executable, process.env)
+        try {
+          await client.initialize()
+          return client
+        } catch (error) {
+          await client.close()
+          throw error
+        }
+      })()
+      this.#client.catch(() => {
+        this.#client = null
+        this.#threads.clear()
+      })
+    }
+    return this.#client
   }
 }
 
@@ -51,18 +91,20 @@ class CodexClient {
   #nextId = 1
   #pending = new Map<number, PendingRequest>()
   #notifications: Array<{ method: string; params: unknown }> = []
-  #waiters: Array<{
-    method: string
-    predicate: (params: unknown) => boolean
-    resolve(params: unknown): void
-  }> = []
+  #waiters: NotificationWaiter[] = []
   #stderr = ""
+  #failure: Error | null = null
+  #closing = false
 
   constructor(executable: string, env: NodeJS.ProcessEnv) {
     this.child = spawn(executable, ["app-server", "--stdio"], { env, stdio: ["pipe", "pipe", "pipe"] })
     const decoder = new JsonLineDecoder((value) => this.#receive(value))
     this.child.stdout.on("data", (chunk: Buffer) => decoder.push(chunk))
     this.child.stderr.on("data", (chunk: Buffer) => { this.#stderr += chunk.toString() })
+    this.child.once("error", (error) => this.#fail(error))
+    this.child.once("close", (code, signal) => {
+      if (!this.#closing) this.#fail(new Error(this.#stderr.trim() || `Codex App Server exited ${signal ?? code}`))
+    })
   }
 
   async initialize(): Promise<void> {
@@ -73,6 +115,7 @@ class CodexClient {
   }
 
   request(method: string, params: unknown): Promise<unknown> {
+    if (this.#failure) return Promise.reject(this.#failure)
     const id = this.#nextId++
     return new Promise((resolve, reject) => {
       this.#pending.set(id, { resolve, reject })
@@ -81,16 +124,17 @@ class CodexClient {
   }
 
   notification(method: string, predicate: (params: unknown) => boolean): Promise<unknown> {
+    if (this.#failure) return Promise.reject(this.#failure)
     const existing = this.#notifications.findIndex((item) => item.method === method && predicate(item.params))
     if (existing >= 0) return Promise.resolve(this.#notifications.splice(existing, 1)[0]!.params)
-    return new Promise((resolve) => this.#waiters.push({ method, predicate, resolve }))
+    return new Promise((resolve, reject) => this.#waiters.push({ method, predicate, resolve, reject }))
   }
 
   async close(): Promise<void> {
+    this.#closing = true
     this.child.stdin.end()
-    if (this.child.exitCode === null) this.child.kill()
-    const code = await waitForExit(this.child)
-    if (code !== 0 && code !== 143 && this.#stderr) throw new Error(this.#stderr.trim())
+    if (this.child.exitCode === null && this.child.signalCode === null) this.child.kill()
+    await waitForExit(this.child)
   }
 
   #send(value: unknown): void {
@@ -116,6 +160,15 @@ class CodexClient {
     const waiter = this.#waiters.findIndex((item) => item.method === message.method && item.predicate(message.params))
     if (waiter >= 0) this.#waiters.splice(waiter, 1)[0]!.resolve(message.params)
     else this.#notifications.push({ method: message.method, params: message.params })
+  }
+
+  #fail(error: Error): void {
+    if (this.#failure) return
+    this.#failure = error
+    for (const pending of this.#pending.values()) pending.reject(error)
+    for (const waiter of this.#waiters) waiter.reject(error)
+    this.#pending.clear()
+    this.#waiters = []
   }
 }
 
