@@ -1,10 +1,23 @@
-export default async function compose({ read, inputEvents, swarm }) {
+export default async function compose({ read, inputEvents, swarm, plugins = [] }) {
   return [
     { role: "system", content: await read("AGENTS.md") },
     { role: "system", content: renderSwarm(swarm) },
+    ...plugins.map((plugin) => ({ role: "system", content: renderPlugin(plugin) })),
     { role: "user", content: await read("context/initial.md") },
     { role: "user", content: JSON.stringify(inputEvents) },
   ]
+}
+
+function renderPlugin(plugin) {
+  const access = plugin.workspace.writable ? "writable draft" : "read-only"
+  return [
+    plugin.instructions.trim(),
+    "",
+    `Binding: ${plugin.command} · ${plugin.mode}`,
+    `Workspace: ${plugin.workspace.directory} (${access})`,
+    `Active commit: ${plugin.workspace.activeCommit}`,
+    `Draft commit: ${plugin.workspace.draftCommit}`,
+  ].join("\n")
 }
 
 function renderSwarm(swarm) {
@@ -35,4 +48,3 @@ function renderSwarm(swarm) {
     ...plugins,
   ].join("\n")
 }
-

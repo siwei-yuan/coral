@@ -157,6 +157,7 @@ export class AgentRuntime {
           agentId: agent.id,
           scope,
           inputEvents,
+          plugins: openedPlugins.flatMap((plugin) => plugin.context ? [plugin.context] : []),
         })
         const result = await adapter.run({
           turnId,
@@ -264,6 +265,7 @@ export class AgentRuntime {
       for (const plugin of access) {
         let activeCheckout: WorkspaceCheckout | undefined
         let draftCheckout: WorkspaceCheckout | undefined
+        let instructions: string | undefined
         try {
           activeCheckout = await this.pluginWorkspaces!.open(
             plugin.id,
@@ -273,14 +275,36 @@ export class AgentRuntime {
           draftCheckout = plugin.draftCommit
             ? await this.pluginWorkspaces!.open(plugin.id, plugin.draftCommit, `${turnId}/${plugin.id}/draft`)
             : undefined
+          instructions = plugin.command
+            ? await this.pluginWorkspaces!.prompt(plugin.id, plugin.activeCommit)
+            : undefined
         } catch (error) {
-          if (activeCheckout) await this.pluginWorkspaces!.close(activeCheckout)
+          await Promise.all([
+            ...(activeCheckout ? [this.pluginWorkspaces!.close(activeCheckout)] : []),
+            ...(draftCheckout ? [this.pluginWorkspaces!.close(draftCheckout)] : []),
+          ])
           throw error
         }
         const directory = draftCheckout?.worktree ?? activeCheckout.worktree
+        const workspace = {
+          id: plugin.id,
+          directory,
+          activeCommit: plugin.activeCommit,
+          draftCommit: plugin.draftCommit ?? plugin.activeCommit,
+          writable: Boolean(draftCheckout),
+        }
         opened.push({
           activeCheckout,
           ...(draftCheckout ? { draftCheckout } : {}),
+          ...(plugin.command ? {
+            context: {
+              id: plugin.id,
+              command: plugin.command,
+              mode: plugin.mode,
+              instructions: instructions!,
+              workspace,
+            },
+          } : {}),
           ...(plugin.command ? {
             command: {
               id: plugin.id,
@@ -293,13 +317,7 @@ export class AgentRuntime {
               },
             },
           } : {}),
-          workspace: {
-            id: plugin.id,
-            directory,
-            activeCommit: plugin.activeCommit,
-            draftCommit: plugin.draftCommit ?? plugin.activeCommit,
-            writable: Boolean(draftCheckout),
-          },
+          workspace,
         })
       }
       return opened
@@ -351,6 +369,13 @@ interface OpenedPlugin {
   activeCheckout: WorkspaceCheckout
   draftCheckout?: WorkspaceCheckout
   command?: HarnessCommand
+  context?: {
+    id: string
+    command: string
+    mode: string
+    instructions: string
+    workspace: HarnessPluginWorkspace
+  }
   workspace: HarnessPluginWorkspace
 }
 

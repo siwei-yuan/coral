@@ -27,6 +27,8 @@ test("a workspace commit immediately changes the Agent's next turn without a Swa
   assert.equal(turnData.workspaceCommit, first.workspaceCommit.commit)
   assert.match(contextText(adapter.runs[0]!), /composer:v1/)
   assert.match(contextText(adapter.runs[0]!), /reviewer/)
+  assert.match(contextText(adapter.runs[0]!), /Use this capability deliberately/)
+  assert.match(contextText(adapter.runs[0]!), /plugin-workspaces/)
   assert.match(contextText(adapter.runs[1]!), /Evolved responsibility/)
   assert.match(contextText(adapter.runs[1]!), /prior Events/)
   assert.match(contextText(adapter.runs[1]!), /composer:v2/)

@@ -254,6 +254,7 @@ A Plugin is one Git-backed, deployable code unit:
 ```text
 runtime.mjs          external world -> Swarm
 bin/<command>.mjs    Agent -> Plugin or external world
+prompt.md            Plugin-owned context input for this capability
 view.mjs             optional Plugin-owned View extension
 ```
 
@@ -263,6 +264,14 @@ and Agents that may call it. Deployment starts `runtime.mjs` from that checkout
 and the Harness receives `bin/<command>.mjs` from the same checkout. The
 optional View is returned by the runtime and has no control-plane authority.
 The current implementation does not claim OS-level isolation.
+
+`prompt.md` explains the capability, when and how to use it, and the effects of
+using it. Core reads it from the active pin and gives it, plus the editable
+Plugin workspace binding, to the Agent's `context.ts`. The Agent owns whether
+and how it enters context. The prompt is never copied into the Agent workspace,
+stored in an Event, returned dynamically by the runtime, or versioned
+separately. A Swarm Revision activates Plugin code, CLI, runtime, and prompt as
+one Git commit.
 
 CLI calls are Harness operations, not Ledger Events. Plugin Events are inbound:
 Chat turns user input into a Communication Event, while Screen

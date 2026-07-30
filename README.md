@@ -99,6 +99,11 @@ outbound Ledger Event. Scheduler configuration also goes through its CLI;
 schedule firings enter as inbound Communications carrying the exact recurring
 duration and Agent-authored note.
 
+Every Plugin commit also contains `prompt.md`. Core supplies the active prompt
+and editable Plugin workspace binding to each authorized Agent's `context.ts`,
+so capability instructions evolve with the pinned implementation without being
+copied into Agent workspaces.
+
 A Revision is a point-in-time snapshot, not a second running Swarm and not a
 barrier around later workspace work. Main and Forks run; Revisions only record
 state. If Main Agents commit after a Proposal was created, those commits are

@@ -829,6 +829,7 @@ export class Swarm {
       await pluginWorkspaces.assertCommit(plugin.id, plugin.commit)
       await pluginWorkspaces.assertCommand(plugin.id, plugin.commit, plugin.command)
       await pluginWorkspaces.assertRuntime(plugin.id, plugin.commit)
+      await pluginWorkspaces.prompt(plugin.id, plugin.commit)
     }
   }
 

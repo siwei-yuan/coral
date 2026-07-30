@@ -45,6 +45,10 @@ test("a Snapshot round-trips the complete Definition and Agent workspace seeds",
     await pluginGit.read("chat", chatCommit, "runtime.mjs"),
   )
   assert.equal(
+    await importedPluginGit.read("chat", chatCommit, "prompt.md"),
+    await pluginGit.read("chat", chatCommit, "prompt.md"),
+  )
+  assert.equal(
     await importedWorkspaces.read("builder", imported.agentHeads.builder!, "context/initial.md"),
     await workspaces.read("builder", agentHeads.builder!, "context/initial.md"),
   )
@@ -106,6 +110,8 @@ test("the bundled Personal Agent snapshot owns four evolvable Agent workspaces",
     imported.definition.plugins.find((plugin) => plugin.id === "chat")?.exposedTo,
     ["chat-agent"],
   )
+  const screenCommit = imported.definition.plugins.find((plugin) => plugin.id === "screen")!.commit
+  assert.match(await pluginGit.read("screen", screenCommit, "prompt.md"), /private local screen-derived data/)
   assert.match(
     await workspaces.read("memory-builder", imported.agentHeads["memory-builder"]!, "AGENTS.md"),
     /improve how memory is selected, organized, connected, compressed/,

@@ -66,6 +66,16 @@ export class PluginWorkspaceRuntime {
     }
   }
 
+  async prompt(pluginId: string, commit: string): Promise<string> {
+    try {
+      const prompt = await this.workspaces.read(pluginId, commit, "prompt.md")
+      if (!prompt.trim()) throw new Error("empty prompt")
+      return prompt
+    } catch {
+      throw new Error(`Plugin prompt is missing at pinned commit: ${pluginId}`)
+    }
+  }
+
   commitEvent(pluginId: string, commit: string): LedgerEvent {
     const event = this.ledger.all().find((candidate) => {
       if (candidate.type !== "plugin.workspace.initialized" && candidate.type !== "plugin.workspace.committed") {

@@ -105,6 +105,7 @@ export function pluginSeed(id: string): WorkspaceFiles {
   return {
     [`bin/${id}.mjs`]: `#!/usr/bin/env node\nconsole.log(${JSON.stringify(`${id}:v1`)})\n`,
     "runtime.mjs": runtimeSource(`${id}:v1`),
+    "prompt.md": `# ${id}\n\nUse this capability deliberately.\n`,
   }
 }
 
@@ -149,10 +150,11 @@ export async function proposeFromAgent(
 export function workspaceSeed(initialContext: string): WorkspaceFiles {
   return {
     "AGENTS.md": "Own this workspace. Improve it only from committed high-level Events.\n",
-    "context.ts": `export default async function compose({ read, inputEvents, swarm }) {
+    "context.ts": `export default async function compose({ read, inputEvents, swarm, plugins = [] }) {
   return [
     { role: "system", content: await read("AGENTS.md") },
     { role: "system", content: renderSwarm(swarm) },
+    ...plugins.map((plugin) => ({ role: "system", content: plugin.instructions + "\\n" + plugin.workspace.directory })),
     { role: "user", content: await read("context/initial.md") },
     { role: "user", content: "composer:v1" },
     { role: "user", content: JSON.stringify(inputEvents) },
