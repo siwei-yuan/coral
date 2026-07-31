@@ -21,8 +21,9 @@ memory, skills, code, and tests. Swarm composes Agents, routing, pinned tests,
 Plugins, Proposals, Forks, Human Decisions, and activation.
 
 An Agent entry in `SwarmDefinition` declares only Swarm-level binding: identity,
-Harness, and turn policy. The Agent's responsibility, instructions, and initial
-context live in its seed workspace, normally in `AGENTS.md` and `context/`.
+Harness, model, optional effort, and turn policy. The Agent's responsibility,
+instructions, and initial context live in its seed workspace, normally in
+`AGENTS.md` and `context/`.
 This keeps every part of the Agent's editable self in the same Git history.
 
 The workspace is deliberately plain:
@@ -102,7 +103,8 @@ binds the new branch to that commit. An unchanged workspace does not create a
 new session branch.
 
 Every `agent.turn.recorded` contains the Coral turn ID and a `trajectory`
-reference with the Harness, resumable session ID, and trajectory turn marker.
+reference with the Harness, model, optional effort, resumable session ID, and
+trajectory turn marker.
 Codex supplies a native turn ID; Claude Code and Pi use the Coral turn marker
 embedded in their native session history. The Event also records the input and
 output workspace commits. The pair is sufficient to project Agent state:
@@ -460,7 +462,8 @@ agents/<agent-id>/...
 plugins/<plugin-id>.bundle
 ```
 
-`snapshot.json` contains the complete Definition and source revision evidence;
+`snapshot.json` contains the complete Definition, including each Agent's exact
+Harness and model selection, and source revision evidence;
 each Agent directory contains its seed workspace tree, while `pluginBundles`
 maps every Plugin ID to a Git bundle containing the exact commit pinned by the
 Definition. Import initializes Agent repositories and imports Plugin Git

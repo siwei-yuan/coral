@@ -7,11 +7,15 @@
       {
         "id": "actor",
         "harness": "codex",
+        "model": "gpt-5.6-terra",
+        "effort": "high",
         "turnPolicy": "single-event"
       },
       {
         "id": "refiner",
         "harness": "codex",
+        "model": "gpt-5.6-terra",
+        "effort": "high",
         "turnPolicy": "single-event"
       }
     ],

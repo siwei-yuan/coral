@@ -13,7 +13,8 @@ function renderSwarm(swarm) {
     const receives = agent.receives.length > 0 ? agent.receives.join(", ") : "nobody"
     const sendsTo = agent.sendsTo.length > 0 ? agent.sendsTo.join(", ") : "nobody"
     const pluginIngress = agent.receivesFromPlugins.length > 0 ? `; Plugin ingress: ${agent.receivesFromPlugins.join(", ")}` : ""
-    return `- ${label}: receives from ${receives}; sends to ${sendsTo}${pluginIngress}`
+    const effort = agent.effort ? ` · ${agent.effort}` : ""
+    return `- ${label}: ${agent.harness} · ${agent.model}${effort}; receives from ${receives}; sends to ${sendsTo}${pluginIngress}`
   })
   const routes = swarm.routes.map((route) => `- ${route.from} -> ${route.to}`)
   const plugins = swarm.plugins.map((plugin) => `- ${plugin.id}: ${plugin.command} (${plugin.mode})`)

@@ -1,7 +1,7 @@
 # Continual Harness-inspired Snapshot
 
-This Snapshot uses the Codex Harness. Install and authenticate Codex before
-deploying it.
+This Snapshot pins the Codex Harness to `gpt-5.6-terra` with `high` effort.
+Install and authenticate Codex before deploying it.
 
 This is a deliberately small Coral Actor–Refiner blueprint:
 

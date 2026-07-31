@@ -6,8 +6,22 @@ an optional native session checkpoint. The Harness returns only an outcome and
 the next checkpoint; Coral itself records the authoritative turn and workspace
 Events.
 
-Coral does not install, authenticate, or select a model for a Harness. Configure
-the chosen CLI independently before starting a Swarm.
+Coral does not install or authenticate a Harness. Each Agent Definition pins
+the Harness, model, and optional effort used for its turns:
+
+```json
+{
+  "id": "builder",
+  "harness": "codex",
+  "model": "gpt-5.6-terra",
+  "effort": "high",
+  "turnPolicy": "batch-events"
+}
+```
+
+`model` is required. `effort` is omitted only when the selected model has no
+corresponding control. Coral passes both values through the chosen Adapter and
+does not maintain a separate model registry.
 
 ## Built-in adapters
 
@@ -16,6 +30,7 @@ the chosen CLI independently before starting a Swarm.
 - Definition ID: `codex`
 - Executable: `codex`
 - Transport: one shared `codex app-server --stdio` process per deployment
+- Model mapping: App Server `model`; effort mapping: App Server `effort`
 - Continuation: thread resume for an unchanged workspace; thread fork from the
   recorded turn at a workspace or Swarm boundary
 
@@ -24,6 +39,7 @@ the chosen CLI independently before starting a Swarm.
 - Definition ID: `claude-code`
 - Executable: `claude`
 - Transport: print mode with streaming JSON
+- Model mapping: `--model`; effort mapping: `--effort`
 - Continuation: `--resume <session>`; boundaries add `--fork-session`
 - Peer and Plugin workspaces are passed as additional readable directories
 
@@ -32,11 +48,14 @@ the chosen CLI independently before starting a Swarm.
 - Definition ID: `pi`
 - Executable: `pi`
 - Transport: RPC mode
+- Model mapping: `--model`; effort mapping: `--thinking`
 - Continuation: `--session <session>` or `--fork <session>`
 - A custom Pi session directory may be supplied to the adapter constructor
 
-The included Snapshots currently select Codex. Change the `harness` field in a
-complete Swarm Definition Proposal to select another registered adapter.
+The included Snapshots select Codex with an explicit model and effort. Change
+`harness`, `model`, or `effort` only through a complete Swarm Definition
+Proposal. Pi model values may include the provider, such as
+`anthropic/claude-sonnet-4-6`.
 
 ## Session semantics
 
@@ -47,8 +66,8 @@ checkpoint instead. This preserves provider-side cache and history while an
 exact workspace head plus `agent.turn.recorded` identifies the corresponding
 trajectory segment.
 
-Coral stores only the Harness ID, session ID, and turn ID in the Ledger. It
-does not copy the native session history.
+Coral stores the Harness ID, model, optional effort, session ID, and turn ID in
+the Ledger. It does not copy the native session history.
 
 ## Adapter contract
 

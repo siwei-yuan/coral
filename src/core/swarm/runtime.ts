@@ -1041,6 +1041,8 @@ function isHarnessCheckpoint(value: unknown): value is HarnessCheckpoint {
   if (!value || typeof value !== "object") return false
   const checkpoint = value as Partial<HarnessCheckpoint>
   return typeof checkpoint.harness === "string" &&
+    typeof checkpoint.model === "string" &&
+    (checkpoint.effort === undefined || typeof checkpoint.effort === "string") &&
     typeof checkpoint.sessionId === "string" &&
     typeof checkpoint.turnId === "string"
 }

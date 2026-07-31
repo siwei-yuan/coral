@@ -9,7 +9,12 @@ test("a Proposal may add an Agent only with an initialized workspace", async (t)
     workspaceSeed("Audit completed work and report evidence."),
   )
   const proposed = structuredClone(definition)
-  proposed.agents.push({ id: "auditor", harness: "scripted", turnPolicy: "single-event" })
+  proposed.agents.push({
+    id: "auditor",
+    harness: "scripted",
+    model: "scripted-v1",
+    turnPolicy: "single-event",
+  })
   proposed.routes.push({ from: "builder", to: "auditor" })
   proposed.tests.push({
     id: "auditor-runs",
@@ -46,9 +51,9 @@ test("a Proposal may add an Agent only with an initialized workspace", async (t)
   assert.ok(auditorRun)
   const swarmContext = builderRun.context.find((message) => message.content.startsWith("# Current Swarm"))
   assert.ok(swarmContext)
-  assert.match(swarmContext.content, /auditor: receives from builder/)
+  assert.match(swarmContext.content, /auditor: .*receives from builder/)
   assert.doesNotMatch(swarmContext.content, /core-behavior|chat-v1/)
-  assert.match(contextText(auditorRun), /auditor \(you\): receives from builder/)
+  assert.match(contextText(auditorRun), /auditor \(you\): .*receives from builder/)
   const promoted = await swarm.approve(fork.id, result.frontier, "owner")
   assert.equal(swarm.activeRevision().definition.agents.some((agent) => agent.id === "auditor"), true)
   assert.equal(swarm.agentHead("auditor"), promoted.agentHeads.auditor)
@@ -91,6 +96,6 @@ test("a Proposal may remove an Agent without deleting its auditable history", as
   await swarm.runFork(historical.id)
   const historicalBuilder = adapter.runs.slice(historicalStart).find((run) => run.agentId === "builder")
   assert.ok(historicalBuilder)
-  assert.match(contextText(historicalBuilder), /builder \(you\): receives from nobody; sends to reviewer/)
+  assert.match(contextText(historicalBuilder), /builder \(you\): .*receives from nobody; sends to reviewer/)
   assert.equal(result.status, "open")
 })

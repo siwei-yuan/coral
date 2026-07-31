@@ -14,7 +14,14 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
     const prepared = await prepareCommands(input.commands)
     input = { ...input, commands: prepared.commands }
     try {
-      const args = ["-p", "--input-format", "text", "--output-format", "stream-json", "--verbose"]
+      const args = [
+        "-p",
+        "--input-format", "text",
+        "--output-format", "stream-json",
+        "--verbose",
+        "--model", input.model,
+      ]
+      if (input.effort) args.push("--effort", input.effort)
       if (input.checkpoint) {
         args.push("--resume", input.checkpoint.sessionId)
         if (input.forkSession) args.push("--fork-session")
@@ -43,7 +50,13 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
       if (!sessionId) throw new Error("Claude Code returned no session id")
       return {
         outcome: failed ? "failed" : "completed",
-        checkpoint: { harness: this.id, sessionId, turnId: input.turnId },
+        checkpoint: {
+          harness: this.id,
+          model: input.model,
+          ...(input.effort ? { effort: input.effort } : {}),
+          sessionId,
+          turnId: input.turnId,
+        },
       }
     } finally {
       await prepared.cleanup()

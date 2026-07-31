@@ -1,7 +1,8 @@
 # Personal Agent Snapshot
 
-This Snapshot uses the Codex Harness and the macOS-only Screen Plugin. Install
-and authenticate Codex first, then read the Screen Plugin's
+This Snapshot pins the Codex Harness to `gpt-5.6-terra` with `high` effort and
+uses the macOS-only Screen Plugin. Install and authenticate Codex first, then
+read the Screen Plugin's
 [privacy and permission notes](../../plugins/screen/README.md).
 
 This Snapshot defines four independently evolving Agents:

@@ -163,6 +163,8 @@ export class AgentRuntime {
         })
         const result = await adapter.run({
           turnId,
+          model: agent.model,
+          ...(agent.effort ? { effort: agent.effort } : {}),
           workingDirectory: checkout.worktree,
           context,
           commands: [

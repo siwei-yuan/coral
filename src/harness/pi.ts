@@ -16,7 +16,8 @@ export class PiHarnessAdapter implements HarnessAdapter {
     const prepared = await prepareCommands(input.commands)
     input = { ...input, commands: prepared.commands }
     try {
-      const args = ["--mode", "rpc"]
+      const args = ["--mode", "rpc", "--model", input.model]
+      if (input.effort) args.push("--thinking", input.effort)
       if (this.sessionDirectory) args.push("--session-dir", this.sessionDirectory)
       if (input.checkpoint) args.push(input.forkSession ? "--fork" : "--session", input.checkpoint.sessionId)
       const child = spawn(this.executable, args, {
@@ -64,7 +65,13 @@ export class PiHarnessAdapter implements HarnessAdapter {
       if ((!agentEnded || !stateRequested || code !== 0 && code !== 143) && stderr) throw new Error(stderr.trim())
       return {
         outcome: "completed",
-        checkpoint: { harness: this.id, sessionId: sessionId!, turnId: input.turnId },
+        checkpoint: {
+          harness: this.id,
+          model: input.model,
+          ...(input.effort ? { effort: input.effort } : {}),
+          sessionId: sessionId!,
+          turnId: input.turnId,
+        },
       }
     } finally {
       await prepared.cleanup()

@@ -2,8 +2,14 @@
   <img src="assets/coral-wordmark.png" alt="Coral" width="640">
 </h1>
 
-Coral is a small, source-first framework for building Agent Swarms that can
-evolve without losing control of what changed.
+Coral is a framework where Agents evolve the same way software does: by
+changing code and committing it.
+
+Each Agent can rewrite its own workspace to improve its context, memory,
+skills, code, and behavior. Agents can also propose code and topology changes
+that evolve the entire Swarm. Every code change is preserved as an exact Git
+commit, and every evolution step is recorded in the Ledger so the full history
+can be audited and reconstructed.
 
 The name comes from a coral colony: each polyp grows its own structure, the
 colony grows as a whole, and its skeleton preserves the layers of that growth.
@@ -73,8 +79,8 @@ A Swarm Revision is a snapshot of the complete Definition and exact Agent and
 Plugin heads. A Proposal may be forked into an isolated temporary evaluation
 state from any prior Revision or Proposal. If a Human approves an exact Fork
 frontier, it becomes the new Main state atomically. Agents added or removed,
-routes, Harnesses, tests, and active Plugin pins all change through this same
-Revision boundary.
+routes, Harnesses, models, effort levels, tests, and active Plugin pins all
+change through this same Revision boundary.
 
 Plugins are Git workspaces with a runtime, an Agent-facing shell CLI, an
 Agent-facing prompt, and an optional View extension. Agents may commit draft
@@ -199,8 +205,8 @@ layers.
 
 ## Programmatic use
 
-Coral is source-first and currently marked `private`; it is not published as an
-npm package. Import it from this checkout:
+Coral currently runs directly from this checkout and is marked `private`; it is
+not published as an npm package. Import it from `src/index.ts`:
 
 ```ts
 import { deploySnapshot, SnapshotStore } from "./src/index.ts"

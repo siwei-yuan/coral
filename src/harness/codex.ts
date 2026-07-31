@@ -38,12 +38,17 @@ export class CodexHarnessAdapter implements HarnessAdapter {
           : this.#threads.has(input.checkpoint.sessionId)
             ? { thread: { id: input.checkpoint.sessionId } }
             : await client.request("thread/resume", { threadId: input.checkpoint.sessionId })
-        : await client.request("thread/start", { cwd: input.workingDirectory })
+        : await client.request("thread/start", {
+            cwd: input.workingDirectory,
+            model: input.model,
+          })
       const threadId = readId(thread, "thread")
       this.#threads.add(threadId)
       const started = await client.request("turn/start", {
         threadId,
         cwd: input.workingDirectory,
+        model: input.model,
+        ...(input.effort ? { effort: input.effort } : {}),
         input: [{ type: "text", text: renderPrompt(input) }],
       })
       const turnId = readId(started, "turn")
@@ -51,7 +56,13 @@ export class CodexHarnessAdapter implements HarnessAdapter {
       const status = readStatus(completed)
       return {
         outcome: status === "completed" ? "completed" : status === "interrupted" ? "cancelled" : "failed",
-        checkpoint: { harness: this.id, sessionId: threadId, turnId },
+        checkpoint: {
+          harness: this.id,
+          model: input.model,
+          ...(input.effort ? { effort: input.effort } : {}),
+          sessionId: threadId,
+          turnId,
+        },
       }
     } finally {
       await prepared.cleanup()

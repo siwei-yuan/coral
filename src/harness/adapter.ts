@@ -2,6 +2,8 @@ import type { ContextMessage } from "../core/workspace/context-bridge.ts"
 
 export interface HarnessCheckpoint {
   harness: string
+  model: string
+  effort?: string
   sessionId: string
   turnId: string
 }
@@ -30,6 +32,8 @@ export interface HarnessPeerWorkspace {
 
 export interface HarnessInput {
   turnId: string
+  model: string
+  effort?: string
   workingDirectory: string
   context: ContextMessage[]
   commands: HarnessCommand[]

@@ -29,6 +29,10 @@ lines.on("line", (line) => {
   if (message.method === "thread/resume") respond(message.id, { thread: { id: message.params.threadId } })
   if (message.method === "thread/fork") respond(message.id, { thread: { id: "codex-fork" } })
   if (message.method === "turn/start") {
+    if (message.params.model !== "gpt-5.6-terra" || message.params.effort !== "high") {
+      send({ id: message.id, error: { message: "wrong model configuration" } })
+      return
+    }
     const id = "codex-turn-" + ++turns
     respond(message.id, { turn: { id } })
     send({ method: "turn/completed", params: { turn: { id, status: "completed" } } })
@@ -40,7 +44,13 @@ function send(value) { process.stdout.write(JSON.stringify(value) + "\\n") }
   const adapter = new CodexHarnessAdapter(executable)
   t.after(() => adapter.stop())
   const started = await adapter.run(harnessInput(root))
-  assert.deepEqual(started.checkpoint, { harness: "codex", sessionId: "codex-new", turnId: "codex-turn-1" })
+  assert.deepEqual(started.checkpoint, {
+    harness: "codex",
+    model: "gpt-5.6-terra",
+    effort: "high",
+    sessionId: "codex-new",
+    turnId: "codex-turn-1",
+  })
   const resumed = await adapter.run(harnessInput(root, started.checkpoint!, false))
   assert.equal(resumed.checkpoint?.sessionId, "codex-new")
   assert.equal(resumed.checkpoint?.turnId, "codex-turn-2")
@@ -66,6 +76,11 @@ test("Claude Code Adapter preserves or forks the supplied session", async (t) =>
 const args = process.argv.slice(2)
 process.stdin.resume()
 process.stdin.on("end", () => {
+  if (args[args.indexOf("--model") + 1] !== "gpt-5.6-terra" || args[args.indexOf("--effort") + 1] !== "high") {
+    process.stderr.write("wrong model configuration")
+    process.exitCode = 2
+    return
+  }
   const resume = args.indexOf("--resume")
   const session = args.includes("--fork-session") ? "claude-fork" : resume >= 0 ? args[resume + 1] : "claude-new"
   process.stdout.write(JSON.stringify({ type: "result", session_id: session, is_error: false }) + "\\n")
@@ -83,6 +98,7 @@ process.stdin.on("end", () => {
 test("Pi Adapter drives one RPC turn and returns its session checkpoint", async (t) => {
   const { root, executable } = await fakeExecutable(t, "pi", `
 import readline from "node:readline"
+const args = process.argv.slice(2)
 const lines = readline.createInterface({ input: process.stdin })
 lines.on("line", (line) => {
   const message = JSON.parse(line)
@@ -91,14 +107,21 @@ lines.on("line", (line) => {
     send({ type: "agent_end" })
   }
   if (message.type === "get_state") {
-    send({ id: message.id, type: "response", command: "get_state", success: true, data: { sessionId: "pi-session" } })
+    const configured = args[args.indexOf("--model") + 1] === "gpt-5.6-terra" && args[args.indexOf("--thinking") + 1] === "high"
+    send({ id: message.id, type: "response", command: "get_state", success: true, data: { sessionId: configured ? "pi-session" : "wrong" } })
   }
 })
 function send(value) { process.stdout.write(JSON.stringify(value) + "\\n") }
 `)
   const adapter = new PiHarnessAdapter({ executable })
   const result = await adapter.run(harnessInput(root))
-  assert.deepEqual(result.checkpoint, { harness: "pi", sessionId: "pi-session", turnId: "turn-1" })
+  assert.deepEqual(result.checkpoint, {
+    harness: "pi",
+    model: "gpt-5.6-terra",
+    effort: "high",
+    sessionId: "pi-session",
+    turnId: "turn-1",
+  })
 })
 
 function harnessInput(
@@ -108,6 +131,8 @@ function harnessInput(
 ): HarnessInput {
   return {
     turnId: "turn-1",
+    model: "gpt-5.6-terra",
+    effort: "high",
     workingDirectory,
     context: [{ role: "user", content: "do the work" }],
     commands: [],
