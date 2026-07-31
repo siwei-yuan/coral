@@ -11,8 +11,8 @@ if (!command || command === "--help" || command === "help") {
 }
 
 if (command !== "reply") fail(`unknown command: ${command}`)
-const stateRoot = process.env.CORALLUM_PLUGIN_STATE
-if (!stateRoot) fail("CORALLUM_PLUGIN_STATE is required")
+const stateRoot = process.env.CORAL_PLUGIN_STATE
+if (!stateRoot) fail("CORAL_PLUGIN_STATE is required")
 
 process.stdin.setEncoding("utf8")
 let text = ""

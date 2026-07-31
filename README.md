@@ -1,4 +1,4 @@
-# Corallum
+# Coral
 
 A small, zero-runtime-dependency implementation of a Harness-centered, Git-backed,
 human-gated Agent Swarm.
@@ -76,7 +76,7 @@ never creates a Proposal implicitly. Workspace storage does not know about
 Swarm Forks; a Fork merely starts with a set of Agent commit IDs.
 
 Every `agent.turn.recorded` Event identifies the resumable Harness session,
-provider checkpoint, and Corallum turn marker. Normal turns resume that session.
+provider checkpoint, and Coral turn marker. Normal turns resume that session.
 A workspace commit or Swarm snapshot boundary makes the next turn fork the
 recorded checkpoint, so a Revision or Proposal frontier identifies both the
 exact Agent workspace and its trajectory without copying session history into
@@ -120,7 +120,7 @@ workspace begins with a Framework-created, Ledger-backed root commit, and a new
 Agent must provide that initial commit. Removing an Agent removes it
 from the new Definition and heads but never deletes its Git or Ledger history.
 
-An Agent uses `corallum send` for routed communication and `corallum propose`
+An Agent uses `coral send` for routed communication and `coral propose`
 for a complete candidate Definition. These commands record private turn
 actions. The Agent commits durable changes in its own workspace and explains
 why in each commit message. After the Harness returns, Core accepts only a
@@ -145,7 +145,7 @@ Harness. An Agent may separately propose a modified complete Swarm Definition
 through the human-gated revision lifecycle.
 
 `snapshots/continual-harness/` is a small Actor–Refiner example inspired by the
-Continual Harness pattern. It is a Corallum blueprint, not a vendored copy or a
+Continual Harness pattern. It is a Coral blueprint, not a vendored copy or a
 claim of compatibility with another project.
 
 `snapshots/personal-agent/` defines Chat Agent, Memory Builder, Proactivity, and
@@ -167,13 +167,13 @@ npm run check
 Create an Instance from any Snapshot, then stop it with `Ctrl-C`:
 
 ```bash
-npm run corallum -- create ./snapshots/personal-agent ./instances/personal-agent
+npm run coral -- create ./snapshots/personal-agent ./instances/personal-agent
 ```
 
 Start the same Instance later, continuing its Ledger:
 
 ```bash
-npm run corallum -- start ./instances/personal-agent
+npm run coral -- start ./instances/personal-agent
 ```
 
 The Default View starts on an available local port and prints its URL. Pass

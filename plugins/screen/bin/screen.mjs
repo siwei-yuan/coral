@@ -8,8 +8,8 @@ if (!command || command === "--help" || command === "help") {
   process.exit(0)
 }
 
-const stateRoot = process.env.CORALLUM_PLUGIN_STATE
-if (!stateRoot) fail("CORALLUM_PLUGIN_STATE is required")
+const stateRoot = process.env.CORAL_PLUGIN_STATE
+if (!stateRoot) fail("CORAL_PLUGIN_STATE is required")
 
 let activityId = id
 if (command === "current") {

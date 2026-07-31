@@ -112,7 +112,7 @@ function runtimeParts(
     pluginWorkspaces,
     pluginEnvironment: (pluginId) => ({
       ...(environments[pluginId] ?? {}),
-      CORALLUM_PLUGIN_STATE: join(root, "state", pluginId),
+      CORAL_PLUGIN_STATE: join(root, "state", pluginId),
     }),
   }
 }

@@ -35,7 +35,7 @@ if (command === "create" && source && target) {
 } else if (command === "start" && source && !target) {
   deployment = await openDeployment({ instanceRoot: resolve(source), human })
 } else {
-  throw new Error("Usage: corallum create <snapshot> <instance> | corallum start <instance>")
+  throw new Error("Usage: coral create <snapshot> <instance> | coral start <instance>")
 }
 
 const port = Number(values["view-port"])

@@ -33,7 +33,7 @@ test("Chat runtime emits user Communication and its Agent CLI writes replies out
       "--caused-by", "event-1",
     ],
     "First paragraph.\n\nSecond paragraph.\n",
-    { env: { ...process.env, CORALLUM_PLUGIN_STATE: root } },
+    { env: { ...process.env, CORAL_PLUGIN_STATE: root } },
   )
   const [replyFile] = await readdir(join(root, "outbox"))
   const reply = JSON.parse(await readFile(join(root, "outbox", replyFile!), "utf8")) as {
@@ -122,7 +122,7 @@ test("Screen pipeline coalesces capture signals, persists an Activity, then emit
   ])
   const activityId = (emitted[0]?.data as { content: Array<{ activityId: string }> }).content[0]!.activityId
   const { stdout } = await execute(join(process.cwd(), "plugins/screen/bin/screen.mjs"), ["activity", activityId], {
-    env: { ...process.env, CORALLUM_PLUGIN_STATE: root },
+    env: { ...process.env, CORAL_PLUGIN_STATE: root },
   })
   const activity = JSON.parse(stdout) as {
     app: { name: string }
@@ -168,9 +168,9 @@ test("Scheduler CLI owns recurring notes and its runtime emits due Communication
   const emitted: PluginIngressDraft[] = []
   const env = {
     ...process.env,
-    CORALLUM_PLUGIN_STATE: root,
-    CORALLUM_AGENT_ID: "reviewer",
-    CORALLUM_PLUGIN_MODE: "live",
+    CORAL_PLUGIN_STATE: root,
+    CORAL_AGENT_ID: "reviewer",
+    CORAL_PLUGIN_MODE: "live",
   }
   const executable = join(process.cwd(), "plugins/scheduler/bin/scheduler.mjs")
   const { stdout } = await execute(
@@ -188,7 +188,7 @@ test("Scheduler CLI owns recurring notes and its runtime emits due Communication
     note: "Review the other Agents.",
     nextAt: scheduledAt,
   }))
-  const runtime = await startPlugin("scheduler", root, emitted, "live", { CORALLUM_SCHEDULER_TICK_MS: "5" })
+  const runtime = await startPlugin("scheduler", root, emitted, "live", { CORAL_SCHEDULER_TICK_MS: "5" })
   await waitFor(() => emitted.length === 1)
   const draft = emitted[0]
   assert.equal(emitted.length, 1)
@@ -257,7 +257,7 @@ function executeWithInput(
 }
 
 async function temporary(t: test.TestContext, name: string): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), `corallum-${name}-`))
+  const root = await mkdtemp(join(tmpdir(), `coral-${name}-`))
   t.after(() => rm(root, { recursive: true, force: true }))
   return root
 }

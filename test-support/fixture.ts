@@ -28,7 +28,7 @@ export async function createFixture(
   t: TestContext,
   { pluginAgents = ["builder"] }: { pluginAgents?: string[] } = {},
 ) {
-  const root = await mkdtemp(join(tmpdir(), "corallum-"))
+  const root = await mkdtemp(join(tmpdir(), "coral-"))
   t.after(() => rm(root, { recursive: true, force: true }))
 
   const workspaces = new GitWorkspaceStore(join(root, "workspaces"))
@@ -240,8 +240,8 @@ class ScriptedHarnessAdapter implements HarnessAdapter {
       proposalDefinition?: SwarmDefinition
       proposalAddedAgentHeads?: Record<string, string>
     }
-    const core = commands.find((command) => command.id === "corallum")!
-    const agentId = core.env!.CORALLUM_AGENT_ID!
+    const core = commands.find((command) => command.id === "coral")!
+    const agentId = core.env!.CORAL_AGENT_ID!
     this.runs.push({
       agentId,
       context,
@@ -282,7 +282,7 @@ class ScriptedHarnessAdapter implements HarnessAdapter {
     const peer = data.readPeer ? peerWorkspaces.find((workspace) => workspace.agentId === data.readPeer) : undefined
     const peerContent = peer ? await readFile(join(peer.directory, data.readPath ?? "AGENTS.md"), "utf8") : undefined
     if (data.proposalDefinition) {
-      const proposal = join(dirname(core.env!.CORALLUM_ACTIONS_FILE!), "proposal.json")
+      const proposal = join(dirname(core.env!.CORAL_ACTIONS_FILE!), "proposal.json")
       await writeFile(proposal, JSON.stringify({
         definition: data.proposalDefinition,
         addedAgentHeads: data.proposalAddedAgentHeads ?? {},
@@ -322,9 +322,9 @@ async function commitWorkspace(directory: string, message: string): Promise<void
     env: {
       ...process.env,
       GIT_AUTHOR_NAME: "Scripted Agent",
-      GIT_AUTHOR_EMAIL: "agent@corallum.local",
+      GIT_AUTHOR_EMAIL: "agent@coral.local",
       GIT_COMMITTER_NAME: "Scripted Agent",
-      GIT_COMMITTER_EMAIL: "agent@corallum.local",
+      GIT_COMMITTER_EMAIL: "agent@coral.local",
     },
   })
 }

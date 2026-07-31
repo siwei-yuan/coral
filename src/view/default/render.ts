@@ -53,7 +53,7 @@ export function renderExtensionPage(
 
 function page(title: string, content: string, extensions: ViewExtensionLink[], active?: string): string {
   const links = extensions.map((item) => `<a class="nav-link${item.plugin === active ? " active" : ""}" href="/extensions/${encodeURIComponent(item.plugin)}"${item.plugin === active ? ` aria-current="page"` : ""}>${escapeHtml(item.title)}</a>`).join("")
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · Corallum</title><style>${styles}</style></head><body class="${active ? "extension-page" : "overview-page"}"><nav><a class="brand" href="/">Corallum</a><div class="nav-items"><a class="nav-link${active ? "" : " active"}" href="/"${active ? "" : ` aria-current="page"`}>Overview</a>${links}</div></nav><main>${content}</main><script>${viewScript}</script></body></html>`
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · Coral</title><style>${styles}</style></head><body class="${active ? "extension-page" : "overview-page"}"><nav><a class="brand" href="/">Coral</a><div class="nav-items"><a class="nav-link${active ? "" : " active"}" href="/"${active ? "" : ` aria-current="page"`}>Overview</a>${links}</div></nav><main>${content}</main><script>${viewScript}</script></body></html>`
 }
 
 function infoDialog(): string {

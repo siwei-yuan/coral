@@ -3,7 +3,7 @@ import { join } from "node:path"
 
 export async function start({ id, mode, stateRoot, env, emit }) {
   if (id !== "scheduler") throw new Error(`Invalid Scheduler Plugin ID: ${id}`)
-  const tickMs = Number(env.CORALLUM_SCHEDULER_TICK_MS ?? 1_000)
+  const tickMs = Number(env.CORAL_SCHEDULER_TICK_MS ?? 1_000)
   if (!Number.isFinite(tickMs) || tickMs < 1) throw new Error("Invalid Scheduler tick interval")
 
   async function due(now = new Date()) {

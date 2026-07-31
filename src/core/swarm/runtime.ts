@@ -187,7 +187,7 @@ export class Swarm {
   appendInput({ type, actor, data, schema }: AppendInput): LedgerEvent {
     this.#assertRunning()
     if (type !== "communication.sent") throw new Error("Swarm input must be communication.sent")
-    if (actor.startsWith("agent/")) throw new Error("Agent communication must use corallum send")
+    if (actor.startsWith("agent/")) throw new Error("Agent communication must use coral send")
     const revision = this.activeRevision()
     return this.ledger.append({
       type,
@@ -203,7 +203,7 @@ export class Swarm {
     this.#assertRunning()
     if (draft.type !== "communication.sent") throw new Error("Plugin ingress must be communication.sent")
     if (!isPluginCommunication(draft.data)) throw new Error("Plugin ingress must identify its source Plugin")
-    if (draft.actor.startsWith("agent/")) throw new Error("Agent communication must use corallum send")
+    if (draft.actor.startsWith("agent/")) throw new Error("Agent communication must use coral send")
     let data = structuredClone(draft.data ?? null)
     if (isPluginCommunication(data)) {
       const targets = this.activeRevision().definition.pluginIngress.filter(

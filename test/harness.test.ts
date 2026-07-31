@@ -122,14 +122,14 @@ function stateCommand(id: string, state: string) {
   return {
     id,
     executable: process.execPath,
-    arguments: ["-e", "process.stdout.write(process.env.CORALLUM_PLUGIN_STATE ?? '')"],
+    arguments: ["-e", "process.stdout.write(process.env.CORAL_PLUGIN_STATE ?? '')"],
     usage: "",
-    env: { CORALLUM_PLUGIN_STATE: state },
+    env: { CORAL_PLUGIN_STATE: state },
   }
 }
 
 async function fakeExecutable(t: TestContext, name: string, source: string) {
-  const root = await mkdtemp(join(tmpdir(), `corallum-${name}-`))
+  const root = await mkdtemp(join(tmpdir(), `coral-${name}-`))
   t.after(() => rm(root, { recursive: true, force: true }))
   const executable = join(root, name)
   await writeFile(executable, `#!/usr/bin/env node\n${source}`)

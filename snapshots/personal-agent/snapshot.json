@@ -30,9 +30,9 @@
       { "plugin": "scheduler", "ingressTo": "auditor" }
     ],
     "plugins": [
-      { "id": "chat", "command": "chat", "commit": "3e4227f04569ac1d4bd06df4b4ac8d7b5ceea71b", "exposedTo": ["chat-agent"], "mode": "live" },
-      { "id": "screen", "command": "screen", "commit": "2c9508c8ecca72a89d16d16a77447158e5e77b30", "exposedTo": ["memory-builder", "proactivity"], "mode": "live" },
-      { "id": "scheduler", "command": "scheduler", "commit": "732101697db47ad009c5b9de26aef98061b7046b", "exposedTo": ["chat-agent", "memory-builder", "proactivity", "auditor"], "mode": "live" }
+      { "id": "chat", "command": "chat", "commit": "ff33636a1f0f4fbdedf748da1fb247df04507d5e", "exposedTo": ["chat-agent"], "mode": "live" },
+      { "id": "screen", "command": "screen", "commit": "9441a4736683685ea5cb2213d6279c91472bbaa9", "exposedTo": ["memory-builder", "proactivity"], "mode": "live" },
+      { "id": "scheduler", "command": "scheduler", "commit": "e04c9f2f7e23ff32e986e2392a77fc0c868c493b", "exposedTo": ["chat-agent", "memory-builder", "proactivity", "auditor"], "mode": "live" }
     ],
     "tests": [
       {

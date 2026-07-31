@@ -9,7 +9,7 @@
 Only Main and Forks are running states. A Revision is a point-in-time snapshot.
 These principles meet at an Agent checkpoint: a workspace commit identifies the
 Agent's editable self, while `agent.turn.recorded` identifies its resumable
-Harness session, checkpoint, and exact Corallum turn marker. A Revision or
+Harness session, checkpoint, and exact Coral turn marker. A Revision or
 Proposal frontier therefore locates both without copying native trajectories
 into the Ledger.
 
@@ -101,9 +101,9 @@ new workspace commit, the next turn forks the completed Harness checkpoint and
 binds the new branch to that commit. An unchanged workspace does not create a
 new session branch.
 
-Every `agent.turn.recorded` contains the Corallum turn ID and a `trajectory`
+Every `agent.turn.recorded` contains the Coral turn ID and a `trajectory`
 reference with the Harness, resumable session ID, and trajectory turn marker.
-Codex supplies a native turn ID; Claude Code and Pi use the Corallum turn marker
+Codex supplies a native turn ID; Claude Code and Pi use the Coral turn marker
 embedded in their native session history. The Event also records the input and
 output workspace commits. The pair is sufficient to project Agent state:
 
@@ -144,7 +144,7 @@ changes or own later commits.
 
 `SwarmDefinition` is the Agent graph; there is no second `GraphRevision` type.
 Each Route is an allowed directed communication edge between two Agents. An
-Agent invokes `corallum send`; Swarm validates each internal recipient against
+Agent invokes `coral send`; Swarm validates each internal recipient against
 the active edge, records `communication.sent`, and performs delivery. Main and
 Forks use the same rule. Arbitrary application Event types are not part of this
 Core graph.
@@ -207,7 +207,7 @@ Git and the Ledger but are not part of the new Main.
 An Agent may author a modified complete `SwarmDefinition`, including Agent
 composition, Harness bindings, routes, tests, and Plugin bindings. This is
 proposal authority, never authority to mutate the active Definition in place.
-It invokes the native `corallum propose` command. After the Harness turn and
+It invokes the native `coral propose` command. After the Harness turn and
 workspace commits finish, Swarm validates the complete Definition, heads,
 Plugin pins, and tests, then creates `swarm.revision.proposed` with the turn
 Event as its cause. There is no intermediate request Event. Only Human approval
@@ -314,8 +314,8 @@ function that accepts only inbound Communication drafts. The runtime owns its
 external integrations and loops and returns `stop()` plus an optional View
 extension. Deployment contains no Chat-, Screen-, or Scheduler-specific code.
 
-Corallum itself exposes two Harness-neutral shell commands. `corallum send`
-records an Agent's request to communicate along a declared Route; `corallum
+Coral itself exposes two Harness-neutral shell commands. `coral send`
+records an Agent's request to communicate along a declared Route; `coral
 propose` submits a complete candidate Definition. During the turn these
 commands append only to a private turn-scoped action file. After the Harness
 returns, Core commits workspace changes, validates each action, and creates the

@@ -55,7 +55,7 @@ test("a Snapshot round-trips the complete Definition and Agent workspace seeds",
 })
 
 test("the bundled Continual Harness snapshot is a bootstrappable Actor-Refiner Swarm", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "corallum-snapshot-"))
+  const root = await mkdtemp(join(tmpdir(), "coral-snapshot-"))
   t.after(() => rm(root, { recursive: true, force: true }))
   const snapshots = new SnapshotStore(join(process.cwd(), "snapshots"))
   const workspaces = new GitWorkspaceStore(join(root, "workspaces"))
@@ -82,7 +82,7 @@ test("the bundled Continual Harness snapshot is a bootstrappable Actor-Refiner S
 })
 
 test("the bundled Personal Agent snapshot owns four evolvable Agent workspaces", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "corallum-personal-snapshot-"))
+  const root = await mkdtemp(join(tmpdir(), "coral-personal-snapshot-"))
   t.after(() => rm(root, { recursive: true, force: true }))
   const snapshots = new SnapshotStore(join(process.cwd(), "snapshots"))
   const workspaces = new GitWorkspaceStore(join(root, "workspaces"))
@@ -123,14 +123,14 @@ test("the bundled Personal Agent snapshot owns four evolvable Agent workspaces",
 })
 
 test("a Snapshot deploys as one running Swarm with pinned Plugin runtimes", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "corallum-deployment-"))
+  const root = await mkdtemp(join(tmpdir(), "coral-deployment-"))
   const deployment = await deploySnapshot({
     snapshots: new SnapshotStore(join(process.cwd(), "snapshots")),
     name: "personal-agent",
     instanceRoot: root,
     human: "owner",
     adapters: [],
-    pluginEnvironments: { screen: { CORALLUM_SCREEN_DISABLED: "1" } },
+    pluginEnvironments: { screen: { CORAL_SCREEN_DISABLED: "1" } },
   })
   t.after(async () => {
     await deployment.stop()

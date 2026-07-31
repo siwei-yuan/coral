@@ -52,8 +52,8 @@ export class GitWorkspaceStore {
     await mkdir(dirname(repository), { recursive: true })
     await mkdir(repository)
     await git(repository, ["init", "-b", "main"])
-    await git(repository, ["config", "user.name", "Corallum Workspace"])
-    await git(repository, ["config", "user.email", "workspace@corallum.local"])
+    await git(repository, ["config", "user.name", "Coral Workspace"])
+    await git(repository, ["config", "user.email", "workspace@coral.local"])
     for (const [path, content] of Object.entries(files)) {
       const target = safePath(repository, path)
       await mkdir(dirname(target), { recursive: true })
@@ -123,8 +123,8 @@ export class GitWorkspaceStore {
       for (const sourceCommit of commits) {
         try {
           await git(checkout.worktree, ["cherry-pick", sourceCommit], {
-            GIT_COMMITTER_NAME: "Corallum Runtime",
-            GIT_COMMITTER_EMAIL: "runtime@corallum.local",
+            GIT_COMMITTER_NAME: "Coral Runtime",
+            GIT_COMMITTER_EMAIL: "runtime@coral.local",
           })
         } catch (error) {
           await git(checkout.worktree, ["cherry-pick", "--abort"]).catch(() => undefined)
@@ -242,7 +242,7 @@ export class GitWorkspaceStore {
     await this.verify(workspaceId, commit)
     const repository = this.#repository(workspaceId)
     await mkdir(dirname(destination), { recursive: true })
-    const exportRef = `refs/heads/corallum-export-${commit.slice(0, 16)}`
+    const exportRef = `refs/heads/coral-export-${commit.slice(0, 16)}`
     await this.#withRepository(workspaceId, async () => {
       await git(repository, ["update-ref", exportRef, commit])
       try {

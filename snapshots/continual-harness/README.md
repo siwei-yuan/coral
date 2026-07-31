@@ -1,6 +1,6 @@
 # Continual Harness-inspired Snapshot
 
-This is a deliberately small Corallum Actor–Refiner blueprint:
+This is a deliberately small Coral Actor–Refiner blueprint:
 
 - Actor receives and emits `communication.sent`; the Swarm routes Actor messages
   to Refiner through the Definition.

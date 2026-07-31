@@ -20,8 +20,8 @@ test("Main routes Agent Communication through the active Swarm Definition", asyn
   )
   const builderPlugin = adapter.runs.at(-2)?.commands.find((command) => command.id === "chat")
   assert.ok(builderPlugin)
-  assert.equal(builderPlugin.env?.CORALLUM_AGENT_ID, "builder")
-  assert.equal(builderPlugin.env?.CORALLUM_PLUGIN_MODE, "live")
+  assert.equal(builderPlugin.env?.CORAL_AGENT_ID, "builder")
+  assert.equal(builderPlugin.env?.CORAL_PLUGIN_MODE, "live")
   assert.equal(adapter.runs.at(-1)?.commands.some((command) => command.id === "chat"), false)
 })
 

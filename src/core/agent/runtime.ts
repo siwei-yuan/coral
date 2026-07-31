@@ -144,7 +144,7 @@ export class AgentRuntime {
     const checkout = await this.workspaces.open(agent.id, baseCommit, turnId)
     const openedPlugins = await this.#openPlugins(pluginAccess, agent.id, turnId)
     const openedPeers = await this.#openPeers(workspaceHeads, agent.id, turnId)
-    const actionRoot = await mkdtemp(join(tmpdir(), "corallum-turn-"))
+    const actionRoot = await mkdtemp(join(tmpdir(), "coral-turn-"))
     const actionsFile = join(actionRoot, "actions.jsonl")
     try {
       let outcome = "failed"
@@ -344,8 +344,8 @@ export class AgentRuntime {
               usage: plugin.command,
               env: {
                 ...plugin.env,
-                CORALLUM_AGENT_ID: agentId,
-                CORALLUM_PLUGIN_MODE: plugin.mode,
+                CORAL_AGENT_ID: agentId,
+                CORAL_PLUGIN_MODE: plugin.mode,
               },
             },
           } : {}),

@@ -16,7 +16,7 @@ import { projectSwarmState } from "../src/core/swarm/state.ts"
 import { createFixture, proposeFromAgent, userMessage } from "../test-support/fixture.ts"
 
 test("a file Ledger reopens and continues its verified hash chain", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "corallum-ledger-"))
+  const root = await mkdtemp(join(tmpdir(), "coral-ledger-"))
   t.after(() => rm(root, { recursive: true, force: true }))
   const path = join(root, "ledger.jsonl")
   const first = Ledger.create(path)
@@ -60,13 +60,13 @@ test("Swarm state projects workspace heads, checkpoints, Proposals, and Forks", 
 })
 
 test("a stopped deployment reopens the same Instance and rejects concurrent runtimes", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "corallum-instance-"))
+  const root = await mkdtemp(join(tmpdir(), "coral-instance-"))
   t.after(() => rm(root, { recursive: true, force: true }))
   const options = {
     instanceRoot: root,
     human: "owner",
     adapters: [],
-    pluginEnvironments: { screen: { CORALLUM_SCREEN_DISABLED: "1" } },
+    pluginEnvironments: { screen: { CORAL_SCREEN_DISABLED: "1" } },
   }
   const first = await deploySnapshot({
     ...options,

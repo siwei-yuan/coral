@@ -156,7 +156,7 @@ test("Plugin drafts evolve immediately but only a Human-approved Swarm Revision 
     run.pluginWorkspaces.some((plugin) => plugin.id === "chat"),
   )
   assert.equal(forkPlugin?.pluginWorkspaces[0]?.activeCommit, v3)
-  assert.equal(forkPlugin?.commands.find((command) => command.id === "chat")?.env?.CORALLUM_PLUGIN_MODE, "mock")
+  assert.equal(forkPlugin?.commands.find((command) => command.id === "chat")?.env?.CORAL_PLUGIN_MODE, "mock")
   assert.equal(forkPlugin?.pluginWorkspaces[0]?.writable, false)
 
   const v4 = (await edit("chat:v4")).pluginWorkspaceCommits.chat!.commit

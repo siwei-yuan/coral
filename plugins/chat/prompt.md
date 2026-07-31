@@ -12,15 +12,15 @@ Write the reply body to stdin. For a structured or multiline reply, use a
 quoted heredoc so paragraphs and line breaks arrive exactly as written:
 
 ```bash
-chat reply --conversation <id> --to <external recipient> --caused-by <event id> <<'CORALLUM_REPLY'
+chat reply --conversation <id> --to <external recipient> --caused-by <event id> <<'CORAL_REPLY'
 First paragraph.
 
 Second paragraph.
-CORALLUM_REPLY
+CORAL_REPLY
 ```
 
 Take the conversation, recipient, and causal Event ID from the inbound
-Communication. Use `corallum send` instead when communicating with another
+Communication. Use `coral send` instead when communicating with another
 Agent.
 
 ## Consequences

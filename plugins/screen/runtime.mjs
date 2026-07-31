@@ -20,7 +20,7 @@ export async function start({ id, mode, stateRoot, env, emit }) {
 
   const captures = (before) => readCaptures(stateRoot, before)
   const captureById = (activityId, captureId) => readCapture(stateRoot, activityId, captureId)
-  if (mode !== "live" || env.CORALLUM_SCREEN_DISABLED === "1") {
+  if (mode !== "live" || env.CORAL_SCREEN_DISABLED === "1") {
     return { view: createView({ captures, capture: captureById }), async stop() {} }
   }
 

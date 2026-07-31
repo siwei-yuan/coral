@@ -8,11 +8,11 @@ if (!command || command === "--help" || command === "help") {
   process.exit(0)
 }
 
-const stateRoot = process.env.CORALLUM_PLUGIN_STATE
-const agentId = process.env.CORALLUM_AGENT_ID
-if (!stateRoot) fail("CORALLUM_PLUGIN_STATE is required")
-if (!agentId) fail("CORALLUM_AGENT_ID is required")
-if (process.env.CORALLUM_PLUGIN_MODE !== "live") fail("Scheduler Plugin must be live")
+const stateRoot = process.env.CORAL_PLUGIN_STATE
+const agentId = process.env.CORAL_AGENT_ID
+if (!stateRoot) fail("CORAL_PLUGIN_STATE is required")
+if (!agentId) fail("CORAL_AGENT_ID is required")
+if (process.env.CORAL_PLUGIN_MODE !== "live") fail("Scheduler Plugin must be live")
 const directory = join(stateRoot, "schedules", encodeURIComponent(agentId))
 
 if (command === "set") {

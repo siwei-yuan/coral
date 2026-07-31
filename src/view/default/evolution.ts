@@ -179,7 +179,7 @@ function timelineDetail(model: DefaultViewModel, node: VisualNode, context: Time
       const x = 760 + (event.seq - context.start) / span * 1420
       const commit = typeof data.commit === "string" ? data.commit : event.id
       const message = typeof data.message === "string" ? data.message : event.type
-      return `<button class="commit-node" style="left:${x - 10}px;top:${y - 10}px" data-dialog-title="${escapeHtml(resource.id)} · ${escapeHtml(shortId(commit))}" data-dialog-meta="#${event.seq} · ${escapeHtml(event.actor)} · ${escapeHtml(formatTime(event.recordedAt))}" data-dialog-detail="${escapeHtml(message)}"><i></i><span>${escapeHtml(shortId(commit))}</span></button>`
+      return `<button class="commit-node" style="left:${x - 190}px;top:-10px" data-dialog-title="${escapeHtml(resource.id)} · ${escapeHtml(shortId(commit))}" data-dialog-meta="#${event.seq} · ${escapeHtml(event.actor)} · ${escapeHtml(formatTime(event.recordedAt))}" data-dialog-detail="${escapeHtml(message)}"><i></i><span>${escapeHtml(shortId(commit))}</span></button>`
     }).join("")
     return `<div class="timeline-lane" style="top:${y}px"><span class="resource-label"><small>${resource.kind}</small><strong>${escapeHtml(resource.id)}</strong></span><code class="initial-head">${escapeHtml(shortId(resource.initial))}</code><i class="lane-line"></i><i class="initial-mark"></i>${commits}</div>`
   }).join("")

@@ -33,9 +33,9 @@ export function renderPrompt(input: HarnessInput): string {
     `- ${workspace.agentId} at ${workspace.directory} (${workspace.commit})`
   ).join("\n")
   return [
-    `<corallum-turn id="${input.turnId}">`,
+    `<coral-turn id="${input.turnId}">`,
     messages,
-    "# Corallum commands",
+    "# Coral commands",
     commands || "None",
     "# Read-only peer workspaces",
     peers || "None",
@@ -46,10 +46,10 @@ export function renderPrompt(input: HarnessInput): string {
       "Use the commit message to explain what changed and why. If no durable self-change is warranted, do not commit.",
       "Uncommitted changes are restored to the last commit at turn end and do not persist.",
       "Writable Plugin workspaces follow the same rule. Do not edit read-only peer workspaces.",
-      "Do not rewrite history, switch branches, or modify Git internals. Corallum owns checkout, refs, integration, and Ledger recording.",
+      "Do not rewrite history, switch branches, or modify Git internals. Coral owns checkout, refs, integration, and Ledger recording.",
     ].join("\n"),
-    "Use the Corallum command for inter-Agent communication or a Swarm Proposal. Your final prose stays in the native Harness trajectory.",
-    "</corallum-turn>",
+    "Use the Coral command for inter-Agent communication or a Swarm Proposal. Your final prose stays in the native Harness trajectory.",
+    "</coral-turn>",
   ].join("\n\n")
 }
 
@@ -64,7 +64,7 @@ export async function prepareCommands(commands: HarnessCommand[]): Promise<{
       if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) throw new Error(`Invalid command environment key: ${key}`)
     }
   }
-  const root = await mkdtemp(join(tmpdir(), "corallum-commands-"))
+  const root = await mkdtemp(join(tmpdir(), "coral-commands-"))
   try {
     const prepared = await Promise.all(commands.map(async (command, index) => {
       if (!command.env || Object.keys(command.env).length === 0) return command

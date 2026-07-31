@@ -8,7 +8,7 @@ import type {
   WorkspaceCheckoutResult,
 } from "../workspace/git-workspace.ts"
 
-const DRAFT_REF = "refs/corallum/draft"
+const DRAFT_REF = "refs/coral/draft"
 
 export class PluginWorkspaceRuntime {
   readonly ledger: Ledger

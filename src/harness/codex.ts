@@ -109,7 +109,7 @@ class CodexClient {
 
   async initialize(): Promise<void> {
     await this.request("initialize", {
-      clientInfo: { name: "corallum", title: "Corallum", version: "0.1.0" },
+      clientInfo: { name: "coral", title: "Coral", version: "0.1.0" },
     })
     this.#send({ method: "initialized", params: {} })
   }

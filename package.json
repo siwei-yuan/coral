@@ -1,10 +1,10 @@
 {
-  "name": "corallum",
+  "name": "coral",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "corallum": "node src/cli.ts",
+    "coral": "node src/cli.ts",
     "test": "node --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm test"
