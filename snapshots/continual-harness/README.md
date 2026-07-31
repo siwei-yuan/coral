@@ -1,5 +1,8 @@
 # Continual Harness-inspired Snapshot
 
+This Snapshot uses the Codex Harness. Install and authenticate Codex before
+deploying it.
+
 This is a deliberately small Coral Actor–Refiner blueprint:
 
 - Actor receives and emits `communication.sent`; the Swarm routes Actor messages
@@ -19,3 +22,12 @@ This is a deliberately small Coral Actor–Refiner blueprint:
 
 It borrows the Actor–Refiner idea. It is not a copy of, runtime integration
 with, or compatibility claim for the upstream Continual Harness project.
+
+Create a fresh local Instance:
+
+```bash
+npm run coral -- create ./snapshots/continual-harness ./instances/continual-harness
+```
+
+See [Snapshots](../README.md) for the format and
+[Operations](../../docs/OPERATIONS.md) for stop and resume.

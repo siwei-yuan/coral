@@ -1,5 +1,9 @@
 # Personal Agent Snapshot
 
+This Snapshot uses the Codex Harness and the macOS-only Screen Plugin. Install
+and authenticate Codex first, then read the Screen Plugin's
+[privacy and permission notes](../../plugins/screen/README.md).
+
 This Snapshot defines four independently evolving Agents:
 
 - `chat-agent` knows the user, answers well, and shares user feedback.
@@ -34,3 +38,12 @@ Each role, memory layout, skill, and context composer lives in its Agent's
 ordinary Git workspace. Routes, Plugin bindings, tests, and Agent composition
 belong to the complete Swarm Definition and change only through a Human-gated
 Revision Proposal.
+
+Create a fresh local Instance:
+
+```bash
+npm run coral -- create ./snapshots/personal-agent ./instances/personal-agent
+```
+
+See [Snapshots](../README.md) for the reusable blueprint boundary and
+[Operations](../../docs/OPERATIONS.md) for stop and resume.
