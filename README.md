@@ -334,5 +334,4 @@ system or hot-reload path for Plugin code.
 
 ## License
 
-No open-source license has been selected yet. Until a `LICENSE` file is added,
-the source is not licensed for redistribution or modification.
+Coral is available under the [MIT License](LICENSE).
