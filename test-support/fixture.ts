@@ -30,7 +30,7 @@ export async function createFixture(t: TestContext) {
 
   const workspaces = new GitWorkspaceStore(join(root, "workspaces"))
   const pluginGit = new GitWorkspaceStore(join(root, "plugin-workspaces"))
-  const ledger = new Ledger()
+  const ledger = Ledger.memory()
   const pluginWorkspaces = new PluginWorkspaceRuntime({ ledger, workspaces: pluginGit })
   const adapter = new ScriptedHarnessAdapter()
   const agentRuntime = new AgentRuntime({ ledger, workspaces, adapters: [adapter], pluginWorkspaces })

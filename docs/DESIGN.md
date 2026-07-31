@@ -475,5 +475,14 @@ supplied under the instance root and remain outside the Snapshot. A later
 Revision activation replaces only runtimes whose pinned commit or mode changed.
 Deployment never resolves a mutable local Plugin folder by name alone.
 
-Durable Ledger persistence and resuming an existing deployed instance remain
-separate from deploying a portable Snapshot as a fresh Swarm.
+The instance directory is the durable running Swarm. Its `ledger.jsonl` is
+write-through and hash-verified, while `agents/`, `plugins/`, and `state/` retain
+their existing local data. Graceful stop first closes Plugin ingress and drains
+Agent queues, then closes Harness adapters and the Ledger. `openDeployment()`
+locks the same directory, verifies the Ledger, projects its Revisions,
+Proposals, Forks, workspace heads, and Harness checkpoints back into runtime
+indexes, and continues appending to the same chain. It does not export a
+continuation bundle or replay already-settled Communication.
+
+This version supports graceful stop and reopen on the same machine and path. It
+does not recover an in-flight turn or queue after process death or power loss.

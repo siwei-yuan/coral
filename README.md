@@ -52,10 +52,11 @@ adds commit Events to Plugin workspaces. Swarm combines Agents and exact commit
 IDs. Concrete Plugin runtimes and Snapshots remain outside Core. The code is
 strict TypeScript executed directly by Node.js.
 
-This implementation keeps the Ledger and Swarm runtime in process, uses real
-Git repositories and worktrees, and includes native Codex, Claude Code, and Pi
-Adapters. Durable runtime persistence remains separate from deploying a
-Snapshot as a fresh Swarm; neither changes the evolution protocol.
+Each local Instance keeps its hash-chained Ledger, Agent and Plugin Git
+repositories, and Plugin state under one directory. The runtime may stop and
+later reopen that directory without creating a new Snapshot. Native Codex,
+Claude Code, and Pi sessions resume from the checkpoints referenced by the
+Ledger.
 
 ## Core lifecycle
 
@@ -174,6 +175,13 @@ const deployment = await deploySnapshot({
 })
 
 const { url } = await deployment.view.listen({ port: 3000 })
+
+await deployment.stop()
+
+const resumed = await openDeployment({
+  instanceRoot: "./instances/personal-agent",
+  human: "owner",
+})
 ```
 
 Once a `Swarm` is running, its built-in Human surface is one object:

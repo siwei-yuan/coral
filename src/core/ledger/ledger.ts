@@ -1,3 +1,5 @@
+import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs"
+import { dirname, resolve } from "node:path"
 import { digest, immutable } from "../canonical.ts"
 
 export type Scope = { kind: "active" } | { kind: "fork"; forkId: string }
@@ -32,10 +34,40 @@ export interface LedgerEvent {
 }
 
 export class Ledger {
-  #events: LedgerEvent[] = []
+  #events: LedgerEvent[]
   #listeners = new Set<(event: LedgerEvent) => void>()
+  #file: number | null
+  #closed = false
+
+  private constructor(events: LedgerEvent[] = [], file: number | null = null) {
+    this.#events = events
+    this.#file = file
+  }
+
+  static memory(): Ledger {
+    return new Ledger()
+  }
+
+  static create(path: string): Ledger {
+    const filePath = resolve(path)
+    mkdirSync(dirname(filePath), { recursive: true })
+    return new Ledger([], openSync(filePath, "wx"))
+  }
+
+  static open(path: string): Ledger {
+    const filePath = resolve(path)
+    const source = readFileSync(filePath, "utf8")
+    const events = source.trim() === ""
+      ? []
+      : source.trimEnd().split("\n").map((line) => immutable<LedgerEvent>(JSON.parse(line)))
+    const ledger = new Ledger(events)
+    if (!ledger.verify()) throw new Error(`Ledger verification failed: ${filePath}`)
+    ledger.#file = openSync(filePath, "a")
+    return ledger
+  }
 
   append(draft: EventDraft): LedgerEvent {
+    if (this.#closed) throw new Error("Ledger is closed")
     validateDraft(draft)
     const seq = this.#events.length + 1
     const previousHash = this.#events.at(-1)?.hash ?? null
@@ -55,6 +87,10 @@ export class Ledger {
     }
     const hash = digest(body)
     const event = immutable<LedgerEvent>({ id: `event_${seq}_${hash.slice(0, 12)}`, ...body, hash })
+    if (this.#file !== null) {
+      writeFileSync(this.#file, `${JSON.stringify(event)}\n`)
+      fsyncSync(this.#file)
+    }
     this.#events.push(event)
     for (const listener of this.#listeners) listener(event)
     return event
@@ -102,6 +138,15 @@ export class Ledger {
       previousHash = hash
     }
     return true
+  }
+
+  close(): void {
+    if (this.#closed) return
+    this.#closed = true
+    if (this.#file === null) return
+    fsyncSync(this.#file)
+    closeSync(this.#file)
+    this.#file = null
   }
 }
 

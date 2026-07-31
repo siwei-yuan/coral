@@ -15,6 +15,7 @@ import {
   proposalWorkspaceCommits,
   safeForkBindings,
 } from "./revision.ts"
+import type { HarnessState, SwarmState } from "./state.ts"
 
 interface BootstrapInput {
   definition: SwarmDefinition
@@ -42,12 +43,6 @@ export interface SwarmTurnResult extends AgentTurnResult {
   outputEvents: LedgerEvent[]
 }
 
-interface HarnessState {
-  checkpoint: HarnessCheckpoint | null
-  workspaceCommit: string
-  forkNext: boolean
-}
-
 export class Swarm {
   #revisions = new Map<string, SwarmRevision>()
   #proposals = new Map<string, SwarmProposal>()
@@ -73,14 +68,34 @@ export class Swarm {
     ledger,
     agentRuntime,
     pluginEnvironment = () => ({}),
+    state,
   }: {
     ledger: Ledger
     agentRuntime: AgentRuntime
     pluginEnvironment?: PluginEnvironment
+    state?: SwarmState
   }) {
     this.ledger = ledger
     this.agentRuntime = agentRuntime
     this.#pluginEnvironment = pluginEnvironment
+    if (state) this.#restore(state)
+  }
+
+  #restore(state: SwarmState): void {
+    this.#revisions = new Map(state.revisions.map((revision) => [revision.id, revision]))
+    this.#proposals = new Map(state.proposals.map((proposal) => [proposal.id, proposal]))
+    this.#forks = new Map(state.forks.map((fork) => [fork.id, { ...fork }]))
+    this.#agentHeads = new Map(Object.entries(state.agentHeads))
+    this.#pluginDraftHeads = new Map(Object.entries(state.pluginDraftHeads))
+    this.#mainHarness = new Map(Object.entries(state.mainHarness))
+    this.#forkHarness = new Map(Object.entries(state.forkHarness).map(([forkId, harness]) => [
+      forkId,
+      new Map(Object.entries(harness)),
+    ]))
+    this.#activeRevisionId = state.activeRevisionId
+    for (const plugin of this.activeRevision().definition.plugins) {
+      if (!this.#pluginDraftHeads.has(plugin.id)) this.#pluginDraftHeads.set(plugin.id, plugin.commit)
+    }
   }
 
   async bootstrap({ definition, agentHeads, human }: BootstrapInput): Promise<SwarmRevision> {
