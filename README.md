@@ -164,7 +164,22 @@ running runtime, Agent CLI, and optional View together.
 npm run check
 ```
 
-Deploy a portable Snapshot as a fresh running Swarm:
+Create an Instance from any Snapshot, then stop it with `Ctrl-C`:
+
+```bash
+npm run corallum -- create ./snapshots/personal-agent ./instances/personal-agent
+```
+
+Start the same Instance later, continuing its Ledger:
+
+```bash
+npm run corallum -- start ./instances/personal-agent
+```
+
+The Default View starts on an available local port and prints its URL. Pass
+`--no-view` for headless operation or `--view-port <port>` to choose a port.
+
+The same lifecycle is available programmatically:
 
 ```ts
 const deployment = await deploySnapshot({
@@ -175,13 +190,6 @@ const deployment = await deploySnapshot({
 })
 
 const { url } = await deployment.view.listen({ port: 3000 })
-
-await deployment.stop()
-
-const resumed = await openDeployment({
-  instanceRoot: "./instances/personal-agent",
-  human: "owner",
-})
 ```
 
 Once a `Swarm` is running, its built-in Human surface is one object:
