@@ -93,6 +93,46 @@ test("a stopped deployment reopens the same Instance and rejects concurrent runt
   ledger.close()
 })
 
+test("graceful stop drains pending Agent mailboxes", async (t) => {
+  const fixture = await createFixture(t)
+  const snapshots = new SnapshotStore(join(fixture.root, "drain-snapshots"))
+  await snapshots.export("drain", {
+    definition: fixture.revision.definition,
+    agentHeads: fixture.revision.agentHeads,
+    workspaces: fixture.workspaces,
+    pluginWorkspaces: fixture.pluginGit,
+  })
+  const deployment = await deploySnapshot({
+    snapshots,
+    name: "drain",
+    instanceRoot: join(fixture.root, "drain-instance"),
+    human: "owner",
+    adapters: [fixture.adapter],
+  })
+  t.after(() => deployment.stop())
+
+  const release = fixture.adapter.blockNext("builder")
+  deployment.swarm.route(deployment.swarm.appendInput(userMessage("builder", "running")).id)
+  await waitFor(() => fixture.adapter.runs.length === 1)
+  deployment.swarm.route(deployment.swarm.appendInput(userMessage("builder", "pending")).id)
+  assert.deepEqual(deployment.swarm.mailboxes().find((item) => item.agentId === "builder"), {
+    agentId: "builder",
+    pending: 1,
+    running: true,
+  })
+
+  const stopped = deployment.stop()
+  release()
+  await stopped
+
+  assert.equal(fixture.adapter.runs.length, 2)
+  assert.deepEqual(deployment.swarm.mailboxes().find((item) => item.agentId === "builder"), {
+    agentId: "builder",
+    pending: 0,
+    running: false,
+  })
+})
+
 test("a failed Plugin activation tears down the accepted Revision deployment", async (t) => {
   const fixture = await createFixture(t)
   const snapshots = new SnapshotStore(join(fixture.root, "failure-snapshots"))
@@ -138,3 +178,11 @@ test("a failed Plugin activation tears down the accepted Revision deployment", a
     failedCommit,
   )
 })
+
+async function waitFor(condition: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 500; attempt += 1) {
+    if (condition()) return
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  throw new Error("Timed out waiting for Agent turn")
+}

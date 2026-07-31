@@ -44,6 +44,12 @@ export interface SwarmTurnResult extends AgentTurnResult {
   outputEvents: LedgerEvent[]
 }
 
+export interface AgentMailboxStatus {
+  agentId: string
+  pending: number
+  running: boolean
+}
+
 export class Swarm {
   #revisions = new Map<string, SwarmRevision>()
   #proposals = new Map<string, SwarmProposal>()
@@ -182,6 +188,14 @@ export class Swarm {
 
   terminate(): void {
     this.#terminated = true
+  }
+
+  mailboxes(): AgentMailboxStatus[] {
+    return this.activeRevision().definition.agents.map((agent) => ({
+      agentId: agent.id,
+      pending: this.#pending.get(agent.id)?.length ?? 0,
+      running: this.#running.has(agent.id),
+    }))
   }
 
   appendInput({ type, actor, data, schema }: AppendInput): LedgerEvent {

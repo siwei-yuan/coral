@@ -16,7 +16,7 @@ export { WorkspaceBridge } from "./core/workspace/context-bridge.ts"
 export type { ContextMessage } from "./core/workspace/context-bridge.ts"
 export { PluginWorkspaceRuntime } from "./core/plugin/workspace.ts"
 export { Swarm } from "./core/swarm/runtime.ts"
-export type { SwarmTurnResult } from "./core/swarm/runtime.ts"
+export type { AgentMailboxStatus, SwarmTurnResult } from "./core/swarm/runtime.ts"
 export { projectAgentSwarmView, validateDefinition } from "./core/swarm/definition.ts"
 export type {
   AgentSwarmView,

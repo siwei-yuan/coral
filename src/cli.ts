@@ -8,6 +8,7 @@ import {
   deploySnapshot,
   openDeployment,
   SnapshotStore,
+  type AgentMailboxStatus,
   type DefaultViewServer,
   type Deployment,
 } from "./index.ts"
@@ -58,6 +59,7 @@ let stopping = false
 async function stop(): Promise<void> {
   if (stopping) return
   stopping = true
+  console.log("Stopping Coral. Draining Agent mailboxes…")
   try {
     if (view) {
       const closed = once(view.server, "close")
@@ -66,11 +68,35 @@ async function stop(): Promise<void> {
     }
   } finally {
     try {
-      await deployment.stop()
+      await stopWithMailboxStatus(deployment)
+      console.log("All Agent mailboxes are clear. Coral stopped.")
     } finally {
       clearInterval(keepAlive)
     }
   }
+}
+
+async function stopWithMailboxStatus(deployment: Deployment): Promise<void> {
+  let previous = printMailboxes(deployment.swarm.mailboxes())
+  const operation = deployment.stop()
+  while (!await Promise.race([
+    operation.then(() => true),
+    new Promise<false>((resolve) => setTimeout(() => resolve(false), 250)),
+  ])) {
+    const statuses = deployment.swarm.mailboxes()
+    const current = JSON.stringify(statuses)
+    if (current === previous) continue
+    previous = printMailboxes(statuses)
+  }
+}
+
+function printMailboxes(statuses: AgentMailboxStatus[]): string {
+  for (const status of statuses) {
+    const turn = status.running ? "running" : "idle"
+    const queue = status.pending === 0 ? "clear" : `${status.pending} queued`
+    console.log(`  ${status.agentId}: ${turn}, ${queue}`)
+  }
+  return JSON.stringify(statuses)
 }
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

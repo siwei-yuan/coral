@@ -220,7 +220,6 @@ async function stopDeployment(
   plugins: PluginRuntimeHost,
   adapters: HarnessAdapter[],
 ): Promise<void> {
-  swarm.terminate()
   let failure: unknown
   try {
     await plugins.stop()
@@ -232,6 +231,7 @@ async function stopDeployment(
   } catch (error) {
     failure ??= error
   }
+  swarm.terminate()
   try {
     await Promise.all(adapters.map((adapter) => adapter.stop?.()))
   } catch (error) {
