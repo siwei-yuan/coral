@@ -1,8 +1,6 @@
-<p align="center">
-  <img src="assets/coral-mascot.png" alt="Coral mascot" width="168">
-</p>
-
-# Coral
+<h1 align="center">
+  <img src="assets/coral-wordmark.png" alt="Coral" width="640">
+</h1>
 
 Coral is a small, source-first framework for building Agent Swarms that can
 evolve without losing control of what changed.
