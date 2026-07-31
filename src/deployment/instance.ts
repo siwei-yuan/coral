@@ -18,6 +18,7 @@ export interface Deployment {
   ledger: Ledger
   swarm: Swarm
   view: DefaultView
+  closed: Promise<void>
   settled(): Promise<void>
   stop(): Promise<void>
 }
@@ -130,24 +131,32 @@ async function startDeployment(
     stateRoot: join(instance.root, "state"),
     environment,
   })
+  let resolveClosed: () => void = () => undefined
+  const closed = new Promise<void>((resolve) => { resolveClosed = resolve })
+  let stopping: Promise<void> | null = null
+  const stop = () => stopping ??= stopDeployment(instance, swarm, plugins, adapters).finally(resolveClosed)
   try {
     await plugins.start()
   } catch (error) {
-    await stopDeployment(instance, swarm, plugins, adapters)
+    await stop()
     throw error
   }
+  swarm.setRevisionActivator(async (definition) => {
+    try {
+      await plugins.activate(definition)
+    } catch (error) {
+      await stop()
+      throw error
+    }
+  })
   const view = new DefaultView({ swarm, human, extensions: () => plugins.extensions() })
-  let stopped = false
   return {
     ledger: instance.ledger,
     swarm,
     view,
-    settled: () => plugins.settled(),
-    stop: async () => {
-      if (stopped) return
-      stopped = true
-      await stopDeployment(instance, swarm, plugins, adapters)
-    },
+    closed,
+    settled: () => swarm.settled(),
+    stop,
   }
 }
 
@@ -211,6 +220,7 @@ async function stopDeployment(
   plugins: PluginRuntimeHost,
   adapters: HarnessAdapter[],
 ): Promise<void> {
+  swarm.terminate()
   let failure: unknown
   try {
     await plugins.stop()

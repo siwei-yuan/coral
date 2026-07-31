@@ -81,3 +81,8 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     })
   })
 }
+
+void deployment.closed.then(() => stop()).catch((error) => {
+  console.error(error)
+  process.exitCode = 1
+})

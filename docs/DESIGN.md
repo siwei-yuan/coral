@@ -399,7 +399,11 @@ or build their own without changing Core.
 Plugin evolution follows the same draft-versus-active separation as Agent
 self-evolution, without adding an independent Plugin approval system.
 
-Each Plugin owns one Git-backed code workspace and one serialized draft head.
+Each Plugin owns one Git-backed code workspace and one authoritative Git draft
+ref. An Agent opens the current ref as its turn base. When the turn finishes,
+Core advances it with Git's compare-and-swap update: the first concurrent edit
+wins, while a stale edit fails its whole turn and produces no Plugin commit
+Event or Agent action. There is no merge, retry, or Plugin lock.
 An Agent in `exposedTo` may edit the whole draft, including runtime, CLI, and
 optional View. An ingress-only Agent sees the active Plugin source read-only;
 no second edit-permission field exists. A successful edit creates a Git commit
@@ -421,9 +425,12 @@ When an Agent proposes a complete Swarm Revision, it may change Chat's pin from
 mock/isolated mode. Plugin code is read-only inside those evaluation Forks in
 the first version: further Plugin edits require another Main draft commit and a
 later Proposal. Human approval activates the selected Swarm Revision and all of
-its Plugin pins together. The runtime host observes the existing
-`swarm.revision.activated` Event and replaces changed pinned runtimes. There is
-no independent Plugin activation Event.
+its Plugin pins together. After recording the accepted Revision, Swarm
+explicitly waits for the runtime host to replace changed pinned runtimes. If
+any Plugin fails to stop or start, the entire deployment stops; the accepted
+Revision remains in the Ledger, so reopening retries that exact active pin.
+There is no rollback, partial-running Swarm, or independent Plugin activation
+Event.
 
 A Proposal uses literal commit IDs only. A turn cannot edit a Plugin and pin
 that newly created commit in the same Proposal action: the commit does not
@@ -434,8 +441,8 @@ draft head and may pin it. This keeps the protocol free of symbolic `latest` or
 Commits skipped by a Proposal, such as `v2`, remain ordinary auditable Git
 history. Commits made after a Proposal remain draft candidates for a later
 Swarm Revision; approving the earlier Proposal does not discard or implicitly
-activate them. The first implementation uses one serialized draft head per
-Plugin rather than per-Agent Plugin branches.
+activate them. The first implementation uses one authoritative Git draft ref
+per Plugin rather than per-Agent Plugin branches.
 
 Git commit IDs are the version identity. Semver, dependency solving, package
 publishing, migration protocols, and a separate Plugin Revision store are not

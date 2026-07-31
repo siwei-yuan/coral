@@ -92,3 +92,49 @@ test("a stopped deployment reopens the same Instance and rejects concurrent runt
   assert.equal(ledger.head().seq, frontier + 1)
   ledger.close()
 })
+
+test("a failed Plugin activation tears down the accepted Revision deployment", async (t) => {
+  const fixture = await createFixture(t)
+  const snapshots = new SnapshotStore(join(fixture.root, "failure-snapshots"))
+  await snapshots.export("failure", {
+    definition: fixture.revision.definition,
+    agentHeads: fixture.revision.agentHeads,
+    workspaces: fixture.workspaces,
+    pluginWorkspaces: fixture.pluginGit,
+    sourceRevisionId: fixture.revision.id,
+  })
+  const instanceRoot = join(fixture.root, "failure-instance")
+  const deployment = await deploySnapshot({
+    snapshots,
+    name: "failure",
+    instanceRoot,
+    human: "owner",
+    adapters: [fixture.adapter],
+  })
+  t.after(() => deployment.stop())
+
+  const edit = deployment.swarm.appendInput(userMessage("builder", "break Chat", {
+    command: "improve-plugin",
+    pluginId: "chat",
+    version: "chat:fail",
+  }))
+  const failedCommit = (await deployment.swarm.runAgentTurn({
+    agentId: "builder",
+    inputEventIds: [edit.id],
+  })).pluginWorkspaceCommits.chat!.commit
+  const definition = structuredClone(deployment.swarm.activeRevision().definition)
+  definition.plugins[0]!.commit = failedCommit
+  const proposal = await proposeFromAgent(deployment.swarm, { definition })
+  const fork = deployment.swarm.createFork(proposal.id, "owner")
+  const evaluated = await deployment.swarm.runFork(fork.id)
+
+  await assert.rejects(deployment.swarm.approve(fork.id, evaluated.frontier, "owner"), /Plugin runtime failed/)
+  await deployment.closed
+  assert.equal(existsSync(join(instanceRoot, "runtime.lock")), false)
+  assert.throws(() => deployment.swarm.appendInput(userMessage("builder", "continue")), /Swarm is terminated/)
+  const activation = deployment.ledger.all().findLast((event) => event.type === "swarm.revision.activated")
+  assert.equal(
+    (activation?.data as { revision: { definition: typeof definition } }).revision.definition.plugins[0]!.commit,
+    failedCommit,
+  )
+})

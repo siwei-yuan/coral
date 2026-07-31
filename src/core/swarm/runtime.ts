@@ -38,6 +38,7 @@ interface AppendInput {
 }
 
 export type PluginEnvironment = (pluginId: string) => Record<string, string>
+export type RevisionActivator = (definition: SwarmDefinition) => Promise<void>
 
 export interface SwarmTurnResult extends AgentTurnResult {
   outputEvents: LedgerEvent[]
@@ -48,7 +49,6 @@ export class Swarm {
   #proposals = new Map<string, SwarmProposal>()
   #forks = new Map<string, MutableFork>()
   #agentHeads = new Map<string, string>()
-  #pluginDraftHeads = new Map<string, string>()
   readonly #pluginEnvironment: PluginEnvironment
   #mainHarness = new Map<string, HarnessState>()
   #forkHarness = new Map<string, Map<string, HarnessState>>()
@@ -60,6 +60,8 @@ export class Swarm {
   #activationOperations: Promise<unknown> = Promise.resolve()
   #mainSessionGeneration = 0
   #forkOperations = new Map<string, Promise<unknown>>()
+  #revisionActivator: RevisionActivator | null = null
+  #terminated = false
 
   readonly ledger: Ledger
   readonly agentRuntime: AgentRuntime
@@ -86,19 +88,16 @@ export class Swarm {
     this.#proposals = new Map(state.proposals.map((proposal) => [proposal.id, proposal]))
     this.#forks = new Map(state.forks.map((fork) => [fork.id, { ...fork }]))
     this.#agentHeads = new Map(Object.entries(state.agentHeads))
-    this.#pluginDraftHeads = new Map(Object.entries(state.pluginDraftHeads))
     this.#mainHarness = new Map(Object.entries(state.mainHarness))
     this.#forkHarness = new Map(Object.entries(state.forkHarness).map(([forkId, harness]) => [
       forkId,
       new Map(Object.entries(harness)),
     ]))
     this.#activeRevisionId = state.activeRevisionId
-    for (const plugin of this.activeRevision().definition.plugins) {
-      if (!this.#pluginDraftHeads.has(plugin.id)) this.#pluginDraftHeads.set(plugin.id, plugin.commit)
-    }
   }
 
   async bootstrap({ definition, agentHeads, human }: BootstrapInput): Promise<SwarmRevision> {
+    this.#assertRunning()
     if (this.#activeRevisionId) throw new Error("Swarm is already bootstrapped")
     assertHuman(human)
     const checkedDefinition = validateDefinition(definition)
@@ -159,7 +158,6 @@ export class Swarm {
     for (const [agentId, head] of Object.entries(agentHeads)) {
       this.#mainHarness.set(agentId, { checkpoint: null, workspaceCommit: head, forkNext: false })
     }
-    for (const plugin of checkedDefinition.plugins) this.#pluginDraftHeads.set(plugin.id, plugin.commit)
     return revision
   }
 
@@ -174,13 +172,20 @@ export class Swarm {
     return head
   }
 
-  pluginDraftHead(pluginId: string): string {
-    const commit = this.#pluginDraftHeads.get(pluginId)
-    if (!commit) throw new Error(`unknown Plugin workspace: ${pluginId}`)
-    return commit
+  async pluginDraftHead(pluginId: string): Promise<string> {
+    return (await this.#pluginWorkspaces().draftHead(pluginId)).commit
+  }
+
+  setRevisionActivator(activator: RevisionActivator): void {
+    this.#revisionActivator = activator
+  }
+
+  terminate(): void {
+    this.#terminated = true
   }
 
   appendInput({ type, actor, data, schema }: AppendInput): LedgerEvent {
+    this.#assertRunning()
     if (type !== "communication.sent") throw new Error("Swarm input must be communication.sent")
     if (actor.startsWith("agent/")) throw new Error("Agent communication must use corallum send")
     const revision = this.activeRevision()
@@ -195,6 +200,7 @@ export class Swarm {
   }
 
   ingest(draft: EventDraft): LedgerEvent {
+    this.#assertRunning()
     if (draft.type !== "communication.sent") throw new Error("Plugin ingress must be communication.sent")
     if (!isPluginCommunication(draft.data)) throw new Error("Plugin ingress must identify its source Plugin")
     if (draft.actor.startsWith("agent/")) throw new Error("Agent communication must use corallum send")
@@ -218,6 +224,7 @@ export class Swarm {
   }
 
   runAgentTurn(input: { agentId: string; inputEventIds: string[] }): Promise<SwarmTurnResult> {
+    this.#assertRunning()
     if (this.#activationBarrier || this.#running.has(input.agentId) || this.#pending.get(input.agentId)?.length) {
       throw new Error(`Agent already has scheduled work: ${input.agentId}`)
     }
@@ -232,6 +239,7 @@ export class Swarm {
   }
 
   route(inputEventId: string): void {
+    this.#assertRunning()
     const input = this.ledger.get(inputEventId)
     if (input.scope.kind !== "active") throw new Error("Main routing requires an active-scoped Event")
     for (const agentId of communicationTargets(this.activeRevision().definition, input)) {
@@ -249,7 +257,7 @@ export class Swarm {
   }
 
   #startAgent(agentId: string): void {
-    if (this.#activationBarrier || this.#running.has(agentId) || !this.#pending.get(agentId)?.length) return
+    if (this.#terminated || this.#activationBarrier || this.#running.has(agentId) || !this.#pending.get(agentId)?.length) return
     const running = this.#drainAgent(agentId)
       .catch((error) => { this.#failures.push(error) })
       .finally(() => {
@@ -292,6 +300,7 @@ export class Swarm {
       forkNext: false,
     }
     const checkpoint = harness.checkpoint?.harness === agent.harness ? harness.checkpoint : null
+    const pluginDraftHeads = await this.#pluginDraftHeads(revision.definition)
     const result = await this.agentRuntime.runTurn({
       agent,
       baseCommit,
@@ -308,7 +317,7 @@ export class Swarm {
           { kind: "revision", id: revision.id },
           scope,
           revision.definition.plugins,
-          Object.fromEntries(this.#pluginDraftHeads),
+          pluginDraftHeads,
         ),
       },
     })
@@ -318,9 +327,6 @@ export class Swarm {
       workspaceCommit: baseCommit,
       forkNext: result.workspaceCommit.commit !== baseCommit || sessionGeneration !== this.#mainSessionGeneration,
     })
-    for (const [pluginId, pluginCommit] of Object.entries(result.pluginWorkspaceCommits)) {
-      this.#pluginDraftHeads.set(pluginId, pluginCommit.commit)
-    }
     const outputEvents: LedgerEvent[] = []
     let proposed = false
     for (const action of result.actions) {
@@ -430,6 +436,7 @@ export class Swarm {
   }
 
   createFork(sourceId: string, human: string): ForkSnapshot {
+    this.#assertRunning()
     assertHuman(human)
     const source = this.#forkSource(sourceId)
     const ordinal = [...this.#forks.values()].filter((fork) => fork.sourceId === sourceId).length + 1
@@ -473,6 +480,7 @@ export class Swarm {
   }
 
   async runFork(forkId: string): Promise<ForkSnapshot> {
+    this.#assertRunning()
     return this.#withFork(forkId, () => this.#runFork(forkId))
   }
 
@@ -500,6 +508,7 @@ export class Swarm {
   }
 
   async approve(forkId: string, expectedFrontier: number, human: string): Promise<SwarmRevision> {
+    this.#assertRunning()
     const current = this.#activationOperations.then(
       () => this.#activate(forkId, expectedFrontier, human),
       () => this.#activate(forkId, expectedFrontier, human),
@@ -524,7 +533,7 @@ export class Swarm {
       return await this.#withFork(forkId, () => this.#approve(forkId, expectedFrontier, human))
     } finally {
       this.#activationBarrier = false
-      for (const agent of this.activeRevision().definition.agents) this.#startAgent(agent.id)
+      if (!this.#terminated) for (const agent of this.activeRevision().definition.agents) this.#startAgent(agent.id)
     }
   }
 
@@ -648,14 +657,20 @@ export class Swarm {
         ]
       }),
     )
-    for (const plugin of fork.definition.plugins) {
-      if (!this.#pluginDraftHeads.has(plugin.id)) this.#pluginDraftHeads.set(plugin.id, plugin.commit)
-    }
     fork.status = "approved"
+    if (this.#revisionActivator) {
+      try {
+        await this.#revisionActivator(revision.definition)
+      } catch (error) {
+        this.terminate()
+        throw error
+      }
+    }
     return revision
   }
 
   async deny(forkId: string, expectedFrontier: number, human: string, reason?: string): Promise<LedgerEvent> {
+    this.#assertRunning()
     return this.#withFork(forkId, async () => this.#deny(forkId, expectedFrontier, human, reason))
   }
 
@@ -937,14 +952,25 @@ export class Swarm {
         ...(binding.exposedTo.includes(agentId) ? { command: binding.command } : {}),
         mode: binding.mode,
         activeCommit: binding.commit,
-        ...(writable && binding.exposedTo.includes(agentId) ? { draftCommit: this.pluginDraftHead(binding.id) } : {}),
+        writable: writable && binding.exposedTo.includes(agentId),
         env: this.#pluginEnvironment(binding.id),
       }))
+  }
+
+  async #pluginDraftHeads(definition: SwarmDefinition): Promise<Record<string, string>> {
+    return Object.fromEntries(await Promise.all(definition.plugins.map(async (plugin) => [
+      plugin.id,
+      await this.pluginDraftHead(plugin.id),
+    ])))
   }
 
   #pluginWorkspaces() {
     if (!this.agentRuntime.pluginWorkspaces) throw new Error("Plugin workspaces are not configured")
     return this.agentRuntime.pluginWorkspaces
+  }
+
+  #assertRunning(): void {
+    if (this.#terminated) throw new Error("Swarm is terminated")
   }
 }
 

@@ -44,9 +44,6 @@ export class PluginRuntimeHost {
   readonly stateRoot: string
   readonly environment: PluginEnvironment
   #active = new Map<string, ActivePlugin>()
-  #unsubscribe: (() => void) | null = null
-  #pending: Promise<void> = Promise.resolve()
-  #failure: unknown = null
 
   constructor({
     swarm,
@@ -66,20 +63,7 @@ export class PluginRuntimeHost {
   }
 
   async start(): Promise<void> {
-    if (this.#unsubscribe) throw new Error("Plugin runtime host is already following the Ledger")
-    this.#unsubscribe = this.swarm.ledger.subscribe((event) => {
-      if (event.type !== "swarm.revision.activated") return
-      const revision = (event.data as { revision?: { definition?: SwarmDefinition } }).revision
-      if (revision?.definition) this.#schedule(revision.definition)
-    })
-    this.#schedule(this.swarm.activeRevision().definition)
-    await this.settled()
-  }
-
-  async settled(): Promise<void> {
-    await this.#pending
-    if (this.#failure) throw this.#failure
-    await this.swarm.settled()
+    await this.activate(this.swarm.activeRevision().definition)
   }
 
   extensions(): ViewExtension[] {
@@ -87,21 +71,18 @@ export class PluginRuntimeHost {
   }
 
   async stop(): Promise<void> {
-    this.#unsubscribe?.()
-    this.#unsubscribe = null
-    await this.#pending
     const active = [...this.#active.values()]
     this.#active.clear()
     await Promise.all(active.map((plugin) => this.#stop(plugin)))
   }
 
-  #schedule(definition: SwarmDefinition): void {
-    this.#pending = this.#pending.then(async () => {
-      this.#failure = null
+  async activate(definition: SwarmDefinition): Promise<void> {
+    try {
       await this.#activate(definition.plugins)
-    }).catch((error) => {
-      this.#failure = error
-    })
+    } catch (error) {
+      await this.stop().catch(() => undefined)
+      throw error
+    }
   }
 
   async #activate(bindings: PluginBinding[]): Promise<void> {

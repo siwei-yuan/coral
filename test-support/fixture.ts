@@ -24,7 +24,10 @@ import {
 
 const execute = promisify(execFile)
 
-export async function createFixture(t: TestContext) {
+export async function createFixture(
+  t: TestContext,
+  { pluginAgents = ["builder"] }: { pluginAgents?: string[] } = {},
+) {
   const root = await mkdtemp(join(tmpdir(), "corallum-"))
   t.after(() => rm(root, { recursive: true, force: true }))
 
@@ -58,7 +61,7 @@ export async function createFixture(t: TestContext) {
       id: "chat",
       command: "chat",
       commit: chatInitial.commit,
-      exposedTo: ["builder"],
+      exposedTo: pluginAgents,
       mode: "live",
     }],
     tests: [
@@ -327,6 +330,7 @@ async function commitWorkspace(directory: string, message: string): Promise<void
 }
 
 function runtimeSource(version: string): string {
+  if (version === "chat:fail") return `export async function start() { throw new Error("Plugin runtime failed") }\n`
   return `import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 export const version = ${JSON.stringify(version)}

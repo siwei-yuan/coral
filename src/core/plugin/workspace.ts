@@ -8,6 +8,8 @@ import type {
   WorkspaceCheckoutResult,
 } from "../workspace/git-workspace.ts"
 
+const DRAFT_REF = "refs/corallum/draft"
+
 export class PluginWorkspaceRuntime {
   readonly ledger: Ledger
   readonly workspaces: GitWorkspaceStore
@@ -19,6 +21,7 @@ export class PluginWorkspaceRuntime {
 
   async initialize(pluginId: string, files: WorkspaceFiles): Promise<WorkspaceCommit> {
     const workspaceCommit = await this.workspaces.initialize(pluginId, files)
+    await this.workspaces.setRef(pluginId, DRAFT_REF, workspaceCommit.commit)
     this.ledger.append({
       type: "plugin.workspace.initialized",
       actor: "workspace/runtime",
@@ -33,6 +36,7 @@ export class PluginWorkspaceRuntime {
     const pinned = await this.workspaces.verify(pluginId, pinnedCommit)
     const initial = await this.workspaces.rootCommit(pluginId, pinnedCommit)
     await this.workspaces.retain(pluginId, `import/${pinnedCommit}`, pinnedCommit)
+    await this.workspaces.setRef(pluginId, DRAFT_REF, pinned.commit)
     this.ledger.append({
       type: "plugin.workspace.initialized",
       actor: "snapshot/runtime",
@@ -93,6 +97,14 @@ export class PluginWorkspaceRuntime {
     return this.workspaces.open(pluginId, commit, operationId)
   }
 
+  async draftHead(pluginId: string): Promise<WorkspaceCommit> {
+    return this.workspaces.resolveCommit(pluginId, DRAFT_REF)
+  }
+
+  async openDraft(pluginId: string, operationId: string): Promise<WorkspaceCheckout> {
+    return this.open(pluginId, (await this.draftHead(pluginId)).commit, operationId)
+  }
+
   finalizeCheckout(checkout: WorkspaceCheckout): Promise<WorkspaceCheckoutResult> {
     return this.workspaces.finalizeCheckout(checkout)
   }
@@ -105,6 +117,14 @@ export class PluginWorkspaceRuntime {
     causation: string[],
   ): Promise<{ workspaceCommit: WorkspaceCommit; events: LedgerEvent[] }> {
     const events: LedgerEvent[] = []
+    if (result.commits.length > 0 && !await this.workspaces.compareAndSwapRef(
+      checkout.workspaceId,
+      DRAFT_REF,
+      result.head.commit,
+      checkout.baseCommit,
+    )) {
+      throw new Error(`Plugin draft changed during Agent turn: ${checkout.workspaceId}`)
+    }
     for (const change of result.commits) {
       await this.workspaces.retain(checkout.workspaceId, `draft/${change.commit}`, change.commit)
       events.push(this.ledger.append({

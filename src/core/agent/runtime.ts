@@ -41,7 +41,7 @@ export interface AgentPluginAccess {
   command?: string
   mode: string
   activeCommit: string
-  draftCommit?: string
+  writable: boolean
   env?: Record<string, string>
 }
 
@@ -149,6 +149,7 @@ export class AgentRuntime {
     try {
       let outcome = "failed"
       let nextCheckpoint: HarnessCheckpoint | null = null
+      let trajectory: HarnessCheckpoint | null = null
       let failure: string | undefined
 
       try {
@@ -174,7 +175,7 @@ export class AgentRuntime {
           forkSession,
         })
         outcome = result.outcome
-        nextCheckpoint = result.checkpoint
+        trajectory = nextCheckpoint = result.checkpoint
       } catch (error) {
         failure = error instanceof Error ? error.message : String(error)
       }
@@ -188,50 +189,39 @@ export class AgentRuntime {
       }
 
       let workspaceResult: WorkspaceCheckoutResult
-      const pluginResults = new Map<string, WorkspaceCheckoutResult>()
+      const pluginWorkspaceCommits: Record<string, WorkspaceCommit> = {}
+      const pluginWorkspaceEvents: LedgerEvent[] = []
       try {
         workspaceResult = await this.workspaces.finalizeCheckout(checkout)
         for (const plugin of openedPlugins) {
           if (!plugin.draftCheckout) continue
-          pluginResults.set(
-            plugin.workspace.id,
-            await this.pluginWorkspaces!.finalizeCheckout(plugin.draftCheckout),
+          const result = await this.pluginWorkspaces!.finalizeCheckout(plugin.draftCheckout)
+          const recorded = await this.pluginWorkspaces!.recordCheckoutResult(
+            plugin.draftCheckout,
+            result,
+            agent.id,
+            turnId,
+            inputEvents.map((event) => event.id),
           )
+          if (result.commits.length > 0) pluginWorkspaceCommits[plugin.workspace.id] = recorded.workspaceCommit
+          pluginWorkspaceEvents.push(...recorded.events)
         }
       } catch (error) {
         outcome = "failed"
         failure = error instanceof Error ? error.message : String(error)
+        actions = []
+        nextCheckpoint = checkpoint ?? null
         workspaceResult = {
           head: await this.workspaces.resolveCommit(agent.id, baseCommit),
           commits: [],
           restored: false,
         }
-        pluginResults.clear()
       }
 
       for (const change of workspaceResult.commits) {
         await this.workspaces.retain(agent.id, `turn/${turnId}/${change.commit}`, change.commit)
       }
       const workspaceCommit = workspaceResult.head
-
-      const pluginWorkspaceCommits: Record<string, WorkspaceCommit> = {}
-      const pluginWorkspaceEvents: LedgerEvent[] = []
-      for (const plugin of openedPlugins) {
-        if (!plugin.draftCheckout) continue
-        const result = pluginResults.get(plugin.workspace.id)
-        if (!result) continue
-        const recorded = await this.pluginWorkspaces!.recordCheckoutResult(
-          plugin.draftCheckout,
-          result,
-          agent.id,
-          turnId,
-          inputEvents.map((event) => event.id),
-        )
-        if (result.commits.length > 0) {
-          pluginWorkspaceCommits[plugin.workspace.id] = recorded.workspaceCommit
-        }
-        pluginWorkspaceEvents.push(...recorded.events)
-      }
 
       const workspaceEvents = workspaceResult.commits.map((change) =>
         this.ledger.append({
@@ -276,7 +266,7 @@ export class AgentRuntime {
           inputWorkspaceCommit: baseCommit,
           workspaceCommit: workspaceCommit.commit,
           outcome,
-          ...(nextCheckpoint ? { trajectory: nextCheckpoint } : {}),
+          ...(trajectory ? { trajectory } : {}),
           ...(failure ? { failure } : {}),
         },
       })
@@ -314,8 +304,8 @@ export class AgentRuntime {
             plugin.activeCommit,
             `${turnId}/${plugin.id}/active`,
           )
-          draftCheckout = plugin.draftCommit
-            ? await this.pluginWorkspaces!.open(plugin.id, plugin.draftCommit, `${turnId}/${plugin.id}/draft`)
+          draftCheckout = plugin.writable
+            ? await this.pluginWorkspaces!.openDraft(plugin.id, `${turnId}/${plugin.id}/draft`)
             : undefined
           instructions = plugin.command
             ? await this.pluginWorkspaces!.prompt(plugin.id, plugin.activeCommit)
@@ -332,7 +322,7 @@ export class AgentRuntime {
           id: plugin.id,
           directory,
           activeCommit: plugin.activeCommit,
-          draftCommit: plugin.draftCommit ?? plugin.activeCommit,
+          draftCommit: draftCheckout?.baseCommit ?? plugin.activeCommit,
           writable: Boolean(draftCheckout),
         }
         opened.push({

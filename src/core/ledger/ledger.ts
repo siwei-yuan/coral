@@ -35,7 +35,6 @@ export interface LedgerEvent {
 
 export class Ledger {
   #events: LedgerEvent[]
-  #listeners = new Set<(event: LedgerEvent) => void>()
   #file: number | null
   #closed = false
 
@@ -92,13 +91,7 @@ export class Ledger {
       fsyncSync(this.#file)
     }
     this.#events.push(event)
-    for (const listener of this.#listeners) listener(event)
     return event
-  }
-
-  subscribe(listener: (event: LedgerEvent) => void): () => void {
-    this.#listeners.add(listener)
-    return () => this.#listeners.delete(listener)
   }
 
   get(id: string): LedgerEvent {

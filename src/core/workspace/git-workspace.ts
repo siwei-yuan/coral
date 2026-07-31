@@ -187,6 +187,24 @@ export class GitWorkspaceStore {
     await git(this.#repository(workspaceId), ["update-ref", ref, commit])
   }
 
+  async setRef(workspaceId: string, ref: string, commit: string): Promise<void> {
+    await this.verify(workspaceId, commit)
+    await this.#withRepository(workspaceId, () => git(this.#repository(workspaceId), ["update-ref", ref, commit]))
+  }
+
+  async compareAndSwapRef(workspaceId: string, ref: string, commit: string, expected: string): Promise<boolean> {
+    await Promise.all([this.verify(workspaceId, commit), this.verify(workspaceId, expected)])
+    return this.#withRepository(workspaceId, async () => {
+      try {
+        await git(this.#repository(workspaceId), ["update-ref", ref, commit, expected])
+        return true
+      } catch (error) {
+        if ((await this.resolveCommit(workspaceId, ref)).commit !== expected) return false
+        throw error
+      }
+    })
+  }
+
   async close(checkout: WorkspaceCheckout): Promise<void> {
     await this.#withRepository(checkout.workspaceId, () =>
       git(checkout.repository, ["worktree", "remove", "--force", checkout.worktree]),

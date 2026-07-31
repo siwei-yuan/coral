@@ -16,7 +16,6 @@ export interface SwarmState {
   forks: MutableFork[]
   activeRevisionId: string
   agentHeads: Record<string, string>
-  pluginDraftHeads: Record<string, string>
   mainHarness: Record<string, HarnessState>
   forkHarness: Record<string, Record<string, HarnessState>>
 }
@@ -47,7 +46,6 @@ export function projectSwarmState(events: LedgerEvent[]): SwarmState {
     forks,
     activeRevisionId: active.id,
     agentHeads,
-    pluginDraftHeads: pluginDraftHeads(events),
     mainHarness,
     forkHarness: Object.fromEntries(forks.map((fork) => [
       fork.id,
@@ -159,18 +157,6 @@ function activationHeads(event: LedgerEvent): Record<string, string> {
   const heads = (event.data as { workspaceHeads?: unknown }).workspaceHeads
   if (!heads || typeof heads !== "object") throw new Error(`Revision has no workspace heads: ${event.id}`)
   return { ...(heads as Record<string, string>) }
-}
-
-function pluginDraftHeads(events: LedgerEvent[]): Record<string, string> {
-  const heads: Record<string, string> = {}
-  for (const event of events) {
-    if (!event.type.startsWith("plugin.workspace.")) continue
-    const data = event.data as { pluginId?: unknown; commit?: unknown; importedHead?: unknown }
-    if (typeof data.pluginId !== "string") continue
-    const commit = typeof data.importedHead === "string" ? data.importedHead : data.commit
-    if (typeof commit === "string") heads[data.pluginId] = commit
-  }
-  return heads
 }
 
 function updateAgentHead(event: LedgerEvent, heads: Record<string, string>, agents: Set<string>): void {
