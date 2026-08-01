@@ -67,7 +67,9 @@ exact workspace head plus `agent.turn.recorded` identifies the corresponding
 trajectory segment.
 
 Coral stores the Harness ID, model, optional effort, session ID, and turn ID in
-the Ledger. It does not copy the native session history.
+the Ledger. It does not copy the native session history. `coral review --turn
+<turn-event-id>` uses that checkpoint to read the exact native turn when the
+Harness still retains it; otherwise it reports the trajectory as unavailable.
 
 ## Adapter contract
 

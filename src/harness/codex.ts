@@ -97,6 +97,26 @@ export class CodexHarnessAdapter implements HarnessAdapter {
   }
 }
 
+export async function readCodexTurn(
+  sessionId: string,
+  turnId: string,
+  executable = "codex",
+): Promise<unknown> {
+  const client = new CodexClient(executable, process.env)
+  try {
+    await client.initialize()
+    const result = await client.request("thread/read", { threadId: sessionId, includeTurns: true })
+    const thread = readObject(result, "thread")
+    const turns = thread.turns
+    if (!Array.isArray(turns)) throw new Error("Codex thread has no turns")
+    const turn = turns.find((item) => item && typeof item === "object" && (item as { id?: unknown }).id === turnId)
+    if (!turn) throw new Error(`Codex trajectory turn is unavailable: ${turnId}`)
+    return turn
+  } finally {
+    await client.close()
+  }
+}
+
 class CodexClient {
   readonly child: ChildProcessWithoutNullStreams
   #nextId = 1
@@ -203,4 +223,11 @@ function readStatus(value: unknown): string {
   if (!turn || typeof turn !== "object") return "failed"
   const status = (turn as { status?: unknown }).status
   return typeof status === "string" ? status : "failed"
+}
+
+function readObject(value: unknown, key: string): Record<string, unknown> {
+  if (!value || typeof value !== "object") throw new Error(`Codex response has no ${key}`)
+  const nested = (value as Record<string, unknown>)[key]
+  if (!nested || typeof nested !== "object") throw new Error(`Codex response has no ${key}`)
+  return nested as Record<string, unknown>
 }

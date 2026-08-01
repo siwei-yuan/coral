@@ -132,8 +132,9 @@ its behavior. It composes four independently evolving Agents:
   recurring patterns and likely next steps, while evolving the evidence and
   interruption threshold required before it reaches out through Chat Agent.
 - [Auditor](snapshots/personal-agent/agents/auditor/AGENTS.md) periodically
-  examines available Agent, workspace, trajectory, and collaboration evidence,
-  then sends concrete improvement advice to the responsible Agent.
+  uses `coral review` to examine Agent, workspace, trajectory, and
+  collaboration evidence, then sends concrete improvement advice to the
+  responsible Agent.
 
 Three Git-backed Plugins form the external boundary:
 

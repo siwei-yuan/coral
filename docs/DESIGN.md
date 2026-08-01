@@ -125,7 +125,9 @@ Harness checkpoint. F1/F2/F3 fork those same checkpoints into independent
 native sessions. The selected Fork's sessions and workspaces become Main;
 activation never cold-starts them. Harness sessions are operational storage,
 not Ledger Events or Revision fields. Their exact checkpoints are recoverable
-through the turn Events and snapshot frontier.
+through the turn Events and snapshot frontier. `coral review --turn` follows
+one checkpoint into native Harness history without copying that history into
+the Ledger.
 
 The Adapter is the complete Harness driver; there is no separate Core session
 history or capability graph. When a Harness exposes a daemon, its lifetime
@@ -316,12 +318,24 @@ function that accepts only inbound Communication drafts. The runtime owns its
 external integrations and loops and returns `stop()` plus an optional View
 extension. Deployment contains no Chat-, Screen-, or Scheduler-specific code.
 
-Coral itself exposes two Harness-neutral shell commands. `coral send`
+Coral itself exposes three Harness-neutral shell commands. `coral send`
 records an Agent's request to communicate along a declared Route; `coral
-propose` submits a complete candidate Definition. During the turn these
-commands append only to a private turn-scoped action file. After the Harness
-returns, Core commits workspace changes, validates each action, and creates the
-authoritative Ledger Event. An Agent cannot choose Event IDs, actors, scope,
+propose` submits a complete candidate Definition. `coral review` reads visible
+Ledger history and, for one exact Turn Event, its referenced native Harness
+trajectory. Review is read-only and creates no Event. Main Agents can review
+the Instance history; a Fork Agent sees only active Events through its source
+frontier plus Events in its own Fork, never sibling Forks.
+
+`review --agent self|<agent-id>|all` returns a bounded chronological index of
+visible Events. `all` removes the Agent filter. `review --event` expands one
+complete Event, and `review --turn` expands one Turn Event plus its native
+trajectory when available. This keeps ordinary context small and makes deeper
+inspection explicit.
+
+During the turn, `send` and `propose` append only to a private turn-scoped
+action file. After the Harness returns, Core commits workspace changes,
+validates each action, and creates the authoritative Ledger Event. An Agent
+cannot choose Event IDs, actors, scope,
 causation, workspace Events, turn Events, or activation Events. Harness
 Adapters therefore return only outcome and trajectory checkpoint; there is no
 generic `events[]` output contract.

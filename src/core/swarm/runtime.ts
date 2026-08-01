@@ -774,6 +774,7 @@ export class Swarm {
           pluginAccess: this.#pluginAccess({ ...fork.definition, plugins: fork.pluginBindings }, agent.id, false),
           ...(checkpoint ? { checkpoint } : {}),
           forkSession: Boolean(checkpoint) && (harness.forkNext || harness.workspaceCommit !== baseCommit),
+          forkSourceFrontier: fork.sourceFrontier,
           runtimeContext: {
             swarm: projectAgentSwarmView(
               fork.definition,

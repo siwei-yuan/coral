@@ -34,6 +34,7 @@ export interface AgentTurnInput {
   pluginAccess?: AgentPluginAccess[]
   checkpoint?: HarnessCheckpoint
   forkSession?: boolean
+  forkSourceFrontier?: number
 }
 
 export interface AgentPluginAccess {
@@ -134,6 +135,7 @@ export class AgentRuntime {
     pluginAccess = [],
     checkpoint,
     forkSession = false,
+    forkSourceFrontier,
   }: AgentTurnInput): Promise<AgentTurnResult> {
     const adapter = this.adapters.get(agent.harness)
     if (!adapter) throw new Error(`Harness Adapter is not registered: ${agent.harness}`)
@@ -168,7 +170,7 @@ export class AgentRuntime {
           workingDirectory: checkout.worktree,
           context,
           commands: [
-            coreCommand(actionsFile, agent.id),
+            coreCommand(actionsFile, agent.id, this.ledger.path, scope, forkSourceFrontier),
             ...openedPlugins.flatMap((plugin) => plugin.command ? [plugin.command] : []),
           ],
           pluginWorkspaces: openedPlugins.map((plugin) => plugin.workspace),

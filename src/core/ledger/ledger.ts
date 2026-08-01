@@ -34,11 +34,13 @@ export interface LedgerEvent {
 }
 
 export class Ledger {
+  readonly path: string | null
   #events: LedgerEvent[]
   #file: number | null
   #closed = false
 
-  private constructor(events: LedgerEvent[] = [], file: number | null = null) {
+  private constructor(events: LedgerEvent[] = [], file: number | null = null, path: string | null = null) {
+    this.path = path
     this.#events = events
     this.#file = file
   }
@@ -50,19 +52,24 @@ export class Ledger {
   static create(path: string): Ledger {
     const filePath = resolve(path)
     mkdirSync(dirname(filePath), { recursive: true })
-    return new Ledger([], openSync(filePath, "wx"))
+    return new Ledger([], openSync(filePath, "wx"), filePath)
   }
 
   static open(path: string): Ledger {
+    const filePath = resolve(path)
+    const ledger = new Ledger(Ledger.read(filePath), null, filePath)
+    ledger.#file = openSync(filePath, "a")
+    return ledger
+  }
+
+  static read(path: string): LedgerEvent[] {
     const filePath = resolve(path)
     const source = readFileSync(filePath, "utf8")
     const events = source.trim() === ""
       ? []
       : source.trimEnd().split("\n").map((line) => immutable<LedgerEvent>(JSON.parse(line)))
-    const ledger = new Ledger(events)
-    if (!ledger.verify()) throw new Error(`Ledger verification failed: ${filePath}`)
-    ledger.#file = openSync(filePath, "a")
-    return ledger
+    if (!new Ledger(events).verify()) throw new Error(`Ledger verification failed: ${filePath}`)
+    return events
   }
 
   append(draft: EventDraft): LedgerEvent {

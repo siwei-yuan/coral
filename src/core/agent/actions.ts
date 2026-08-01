@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises"
 import { fileURLToPath } from "node:url"
 import type { HarnessCommand } from "../../harness/adapter.ts"
+import type { Scope } from "../ledger/ledger.ts"
 import type { SwarmDefinition } from "../swarm/definition.ts"
 
 export interface SendAction {
@@ -17,15 +18,32 @@ export interface ProposeAction {
 
 export type AgentAction = SendAction | ProposeAction
 
-export function coreCommand(actionsFile: string, agentId: string): HarnessCommand {
+export function coreCommand(
+  actionsFile: string,
+  agentId: string,
+  ledgerPath: string | null,
+  scope: Scope,
+  forkSourceFrontier?: number,
+): HarnessCommand {
   return {
     id: "coral",
     executable: process.execPath,
     arguments: [fileURLToPath(new URL("./command.mjs", import.meta.url))],
-    usage: "send --to <agent> --text <message> | propose --file <proposal.json>",
+    usage: [
+      "send --to <agent-id> [--to <agent-id>...] --text <message>",
+      "propose --file <proposal.json>",
+      "review --agent <self|agent-id|all> --after <seq> --number <0..30>",
+      "review --agent <self|agent-id|all> --recent --number <0..30>",
+      "review --event <event-id>",
+      "review --turn <turn-event-id>",
+    ].join(" | "),
     env: {
       CORAL_ACTIONS_FILE: actionsFile,
       CORAL_AGENT_ID: agentId,
+      CORAL_SCOPE_KIND: scope.kind,
+      ...(ledgerPath ? { CORAL_LEDGER_PATH: ledgerPath } : {}),
+      ...(scope.kind === "fork" ? { CORAL_FORK_ID: scope.forkId } : {}),
+      ...(forkSourceFrontier === undefined ? {} : { CORAL_FORK_SOURCE_FRONTIER: String(forkSourceFrontier) }),
     },
   }
 }
