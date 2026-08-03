@@ -35,6 +35,8 @@ environment.
 Built-in Plugins:
 
 - [Chat](chat/README.md) — local user input and Agent replies
+- [Composio](composio/README.md) — connected external tools through the local
+  Composio CLI
 - [Screen](screen/README.md) — sparse macOS foreground activity and OCR
 - [Scheduler](scheduler/README.md) — Agent-managed recurring wakeups
 

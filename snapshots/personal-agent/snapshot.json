@@ -22,6 +22,7 @@
     ],
     "pluginIngress": [
       { "plugin": "chat", "ingressTo": "chat-agent" },
+      { "plugin": "composio", "ingressTo": "chat-agent" },
       { "plugin": "screen", "ingressTo": "memory-builder" },
       { "plugin": "screen", "ingressTo": "proactivity" },
       { "plugin": "scheduler", "ingressTo": "chat-agent" },
@@ -31,6 +32,7 @@
     ],
     "plugins": [
       { "id": "chat", "command": "chat", "commit": "efebeec9f86166431afcdc5b636fe7afb0db0a55", "exposedTo": ["chat-agent"], "mode": "live" },
+      { "id": "composio", "command": "composio", "commit": "a7d11eebc4041d2991720f7d68ee4c4acea01d85", "exposedTo": ["chat-agent"], "mode": "live" },
       { "id": "screen", "command": "screen", "commit": "a3448cfd8d52b66bac5e6d1203140c650d39de05", "exposedTo": ["memory-builder", "proactivity"], "mode": "live" },
       { "id": "scheduler", "command": "scheduler", "commit": "799c8e88e7f8fab697d891ac5e91e872b8837bac", "exposedTo": ["chat-agent", "memory-builder", "proactivity", "auditor"], "mode": "live" }
     ],
@@ -77,6 +79,7 @@
   },
   "pluginBundles": {
     "chat": "plugins/chat.bundle",
+    "composio": "plugins/composio.bundle",
     "screen": "plugins/screen.bundle",
     "scheduler": "plugins/scheduler.bundle"
   },

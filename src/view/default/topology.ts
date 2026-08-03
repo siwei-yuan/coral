@@ -33,9 +33,9 @@ export function topologySector(definition: SwarmDefinition, events: LedgerEvent[
 
 function topology(definition: SwarmDefinition): string {
   const width = 920
-  const height = Math.max(560, definition.agents.length * 116 + 80, definition.plugins.length * 146 + 80)
+  const height = Math.max(560, Math.max(definition.agents.length, definition.plugins.length) * 116 + 80)
   const agents = new Map(definition.agents.map((agent, index) => [agent.id, { x: 150, y: 48 + index * 116, w: 250, h: 78 }]))
-  const plugins = new Map(definition.plugins.map((plugin, index) => [plugin.id, { x: 650, y: 70 + index * ((height - 140) / Math.max(1, definition.plugins.length - 1)), w: 230, h: 78 }]))
+  const plugins = new Map(definition.plugins.map((plugin, index) => [plugin.id, { x: 650, y: 48 + index * 116, w: 230, h: 78 }]))
   const routeEdges = agentRoutes(definition).map((route, index) => {
     const source = agents.get(route.from)!
     const target = agents.get(route.to)!
@@ -66,7 +66,7 @@ function topology(definition: SwarmDefinition): string {
           : "not exposed"
     return topologyNode(plugin.id, "Plugin", relation, plugins.get(plugin.id)!)
   }).join("")
-  return `<svg class="topology-graph" viewBox="0 0 ${width} ${height}" role="img" aria-label="Agents with configured communication routes and Plugin access"><defs><marker id="route-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto-start-reverse"><path d="M0 0L7 3.5L0 7Z"/></marker></defs><g data-topology-edges>${routeEdges}${pluginEdges}</g>${agentNodes}${pluginNodes}<circle class="flow-dot" r="7" data-flow-dot></circle></svg>`
+  return `<div class="topology-viewport" data-topology-viewport><div class="topology-plane" data-topology-plane data-width="${width}" data-height="${height}" style="width:${width}px;height:${height}px"><svg class="topology-graph" viewBox="0 0 ${width} ${height}" role="img" aria-label="Agents with configured communication routes and Plugin access"><defs><marker id="route-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto-start-reverse"><path d="M0 0L7 3.5L0 7Z"/></marker></defs><g data-topology-edges>${routeEdges}${pluginEdges}</g>${agentNodes}${pluginNodes}<circle class="flow-dot" r="7" data-flow-dot></circle></svg></div></div>`
 }
 
 function agentRoutes(definition: SwarmDefinition): AgentRoute[] {

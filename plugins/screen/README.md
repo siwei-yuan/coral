@@ -50,6 +50,6 @@ first. The Default View loads history 20 captures at a time and lazy-loads
 previews. Opening the View is not what starts capture—the live Plugin runtime
 starts it with the Swarm.
 
-Programmatic deployments may set `CORAL_SCREEN_DISABLED=1` in the Screen
-Plugin's environment to run its View without native capture. The generic CLI
-does not currently expose Plugin environment configuration flags.
+Set `CORAL_SCREEN_DISABLED=1` when running `coral create` or `coral start` to
+run the Screen View without native capture. Programmatic deployments may pass
+the same value in the Screen Plugin's environment.

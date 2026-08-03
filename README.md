@@ -36,6 +36,8 @@ Requirements:
 - Git
 - at least one installed and authenticated Harness CLI: Codex, Claude Code, or
   Pi
+- the installed and authenticated Composio CLI for Personal Agent external
+  tools
 - macOS for the bundled Screen Plugin
 
 After cloning the repository:
@@ -136,10 +138,14 @@ its behavior. It composes four independently evolving Agents:
   collaboration evidence, then sends concrete improvement advice to the
   responsible Agent.
 
-Three Git-backed Plugins form the external boundary:
+Four Git-backed Plugins form the external boundary:
 
 - [Chat](plugins/chat/README.md) turns local user input into routed
   Communications and gives Chat Agent a CLI for direct replies.
+- [Composio](plugins/composio/README.md) gives only Chat Agent access to the
+  user's connected external services through the official local Composio CLI.
+  Its optional signed trigger listener routes V3 trigger messages back to Chat
+  Agent.
 - [Screen](plugins/screen/README.md) records sparse foreground activity, local
   OCR, and image references. Memory Builder and Proactivity query the private
   artifacts only when an activity is relevant.
@@ -149,8 +155,9 @@ Three Git-backed Plugins form the external boundary:
 
 The self-iteration loop is deliberately plain:
 
-1. Chat, Screen, or Scheduler appends an external Communication to the durable
-   Ledger.
+1. Chat, Screen, Scheduler, or an enabled Composio trigger listener appends an
+   external Communication to the durable Ledger; Composio tool calls remain
+   outbound Agent commands.
 2. Swarm routes it into each target Agent's independent mailbox. Different
    Agents can run concurrently; a busy Agent keeps new input queued for its
    next turn.
@@ -168,10 +175,10 @@ The self-iteration loop is deliberately plain:
    denial keeps its full history without activating it.
 
 Plugin code follows the same controlled boundary. An authorized Agent can
-commit successive Chat, Screen, or Scheduler draft improvements, while the
-running Swarm continues using the old pin. A Proposal selects an exact audited
-Plugin commit, and approval activates its runtime, CLI, prompt, and optional
-View together.
+commit successive Chat, Composio, Screen, or Scheduler draft improvements,
+while the running Swarm continues using the old pin. A Proposal selects an
+exact audited Plugin commit, and approval activates its runtime, CLI, prompt,
+and optional View together.
 
 This example shows how several self-improving local loops can share evidence
 and advice while the topology and external capability boundary remain

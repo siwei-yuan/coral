@@ -360,6 +360,23 @@ explicitly targets the schedule owner. Schedule configuration is a CLI operation
 rather than a Ledger Event. The current version deliberately has no cron
 grammar, calendar recurrence, workflow engine, or Scheduler-specific View.
 
+Composio is also a normal Plugin and remains outside Core. Its CLI wrapper
+delegates live calls unchanged to the locally authenticated official Composio
+CLI; it does not maintain a parallel command catalog. Composio owns login,
+connected accounts, credentials, schemas, tool execution, trigger instances,
+delivery, retries, and signing. Calls are external Plugin effects rather than
+synthetic Ledger Events, and Fork/mock bindings fail closed.
+
+The Personal Agent exposes the CLI and routes Composio ingress only to Chat
+Agent. When explicitly enabled, the local Plugin runtime follows Composio's
+documented development path: `composio dev listen --forward` sends signed V3
+webhook envelopes to a loopback handler. The handler verifies the documented
+HMAC signature and timestamp tolerance, ignores non-trigger project messages,
+and emits one inbound `communication.sent` containing the unchanged
+`composio.trigger.message` envelope. The Composio message ID is the external
+reference and normal `pluginIngress` owns Agent routing. Production webhook
+registration and hosting remain outside the local Snapshot.
+
 Screen is also entirely Plugin-owned. Its pinned runtime starts a small macOS
 helper that observes activity signals without storing keys or pointer data.
 App/window changes and settled input bursts are coalesced into sparse captures;
