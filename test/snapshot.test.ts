@@ -104,12 +104,22 @@ test("the bundled Personal Agent snapshot owns four evolvable Agent workspaces",
     imported.definition.pluginIngress.filter((edge) => edge.plugin === "scheduler").map((edge) => edge.ingressTo),
     ["chat-agent", "memory-builder", "proactivity", "auditor"],
   )
-  assert.deepEqual(Object.keys(imported.pluginHeads).sort(), ["chat", "scheduler", "screen"])
+  assert.deepEqual(Object.keys(imported.pluginHeads).sort(), ["chat", "composio", "scheduler", "screen"])
   assert.deepEqual(revision.definition.plugins.map((plugin) => plugin.commit), Object.values(imported.pluginHeads))
   assert.deepEqual(
     imported.definition.plugins.find((plugin) => plugin.id === "chat")?.exposedTo,
     ["chat-agent"],
   )
+  assert.deepEqual(
+    imported.definition.plugins.find((plugin) => plugin.id === "composio")?.exposedTo,
+    ["chat-agent"],
+  )
+  assert.deepEqual(
+    imported.definition.pluginIngress.filter((edge) => edge.plugin === "composio").map((edge) => edge.ingressTo),
+    ["chat-agent"],
+  )
+  const composioCommit = imported.definition.plugins.find((plugin) => plugin.id === "composio")!.commit
+  assert.match(await pluginGit.read("composio", composioCommit, "prompt.md"), /require an explicit `--account/)
   const screenCommit = imported.definition.plugins.find((plugin) => plugin.id === "screen")!.commit
   assert.match(await pluginGit.read("screen", screenCommit, "prompt.md"), /private local screen-derived data/)
   assert.match(

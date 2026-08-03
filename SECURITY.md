@@ -42,6 +42,21 @@ Snapshots intentionally exclude Plugin state, secrets, runtime queues, and
 native Harness session storage. Do not place credentials in a Snapshot or
 Agent workspace.
 
+The bundled Composio Plugin runs the locally installed Composio CLI with the
+current user's authority. Composio authentication, connected accounts, caches,
+and artifacts live outside the Coral Instance and Snapshot. Tool execution,
+raw proxy calls, and multi-step runs may read private data or change external
+services; inspect the active Plugin pin and connected-account scope before
+granting an Agent access.
+
+Composio trigger ingress is disabled by default. When enabled, the Plugin
+starts a loopback-only webhook handler and verifies the official signature
+headers with a fresh runtime-generated secret before creating a Communication.
+That ephemeral secret is passed only to the local listener and verifier, not
+stored in the Snapshot, Instance, or Agent command environment. The local CLI
+listener receives every matching trigger event in the current Composio project
+unless the trigger instances themselves are scoped more narrowly.
+
 ## Integrity limits
 
 The Ledger is append-only, hash-chained, and flushed to disk. This detects

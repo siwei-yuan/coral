@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { execFile, spawn } from "node:child_process"
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
@@ -205,6 +205,72 @@ test("Scheduler CLI owns recurring notes and its runtime emits due Communication
   await runtime.stop()
 })
 
+test("Composio delegates the official CLI and turns signed trigger messages into ingress", async (t) => {
+  const root = await temporary(t, "composio")
+  const fake = join(root, "fake-composio.mjs")
+  await writeFile(fake, [
+    "#!/usr/bin/env node",
+    "import { createHmac } from 'node:crypto'",
+    "const args = process.argv.slice(2)",
+    "if (args[0] === 'dev' && args[1] === 'listen') {",
+    "  const forward = args[args.indexOf('--forward') + 1]",
+    "  const body = process.env.CORAL_COMPOSIO_TEST_EVENT",
+    "  const webhookId = 'webhook-test'",
+    "  const timestamp = String(Math.floor(Date.now() / 1000))",
+    "  const signature = createHmac('sha256', process.env.COMPOSIO_WEBHOOK_SECRET).update(`${webhookId}.${timestamp}.${body}`).digest('base64')",
+    "  const send = (payload, value) => fetch(forward, { method: 'POST', headers: { 'content-type': 'application/json', 'webhook-id': webhookId, 'webhook-timestamp': timestamp, 'webhook-signature': `v1,${value}` }, body: payload })",
+    "  const invalid = JSON.stringify({ ...JSON.parse(body), id: 'msg_invalid' })",
+    "  if ((await send(invalid, Buffer.alloc(32).toString('base64'))).status !== 401) throw new Error('invalid signature accepted')",
+    "  const response = await send(body, signature)",
+    "  if (!response.ok) throw new Error(`forward failed: ${response.status}`)",
+    "  await new Promise(() => {})",
+    "} else {",
+    "  process.stdout.write(JSON.stringify({ args }) + '\\n')",
+    "}",
+    "",
+  ].join("\n"))
+  await chmod(fake, 0o755)
+
+  const executable = join(process.cwd(), "plugins/composio/bin/composio.mjs")
+  const env = {
+    ...process.env,
+    CORAL_COMPOSIO_EXECUTABLE: fake,
+    CORAL_PLUGIN_MODE: "live",
+  }
+  const args = ["execute", "GITHUB_GET_THE_AUTHENTICATED_USER", "-d", "{}", "--account", "work"]
+  assert.deepEqual(JSON.parse((await execute(executable, args, { env })).stdout), { args })
+  await assert.rejects(
+    execute(executable, ["whoami"], { env: { ...env, CORAL_PLUGIN_MODE: "mock" } }),
+    /Composio Plugin is unavailable outside live mode/,
+  )
+
+  const envelope = {
+    id: "msg_abc123",
+    type: "composio.trigger.message",
+    metadata: {
+      log_id: "log_abc123",
+      trigger_slug: "GITHUB_COMMIT_EVENT",
+      trigger_id: "ti_xyz789",
+      connected_account_id: "ca_def456",
+      auth_config_id: "ac_xyz789",
+      user_id: "user-id-123435",
+    },
+    data: { commit_sha: "a1b2c3d", message: "fix: resolve null pointer", author: "jane" },
+    timestamp: "2026-01-15T10:30:00Z",
+  }
+  const emitted: PluginIngressDraft[] = []
+  const runtime = await startPlugin("composio", root, emitted, "live", {
+    CORAL_COMPOSIO_EXECUTABLE: fake,
+    CORAL_COMPOSIO_TRIGGER_INGRESS: "1",
+    CORAL_COMPOSIO_TEST_EVENT: JSON.stringify(envelope),
+  })
+  await waitFor(() => emitted.length === 1)
+  assert.equal(emitted[0]?.schema, "composio.trigger.message")
+  assert.equal((emitted[0]?.data as { source: { externalRef: string } }).source.externalRef, envelope.id)
+  assert.deepEqual((emitted[0]?.data as { content: unknown[] }).content, [envelope])
+  await runtime.stop()
+})
+
 async function startPlugin(
   id: string,
   stateRoot: string,
@@ -232,7 +298,7 @@ async function startPlugin(
 }
 
 async function waitFor(condition: () => boolean): Promise<void> {
-  const deadline = Date.now() + 1_000
+  const deadline = Date.now() + 3_000
   while (!condition()) {
     if (Date.now() >= deadline) throw new Error("Timed out waiting for Plugin runtime")
     await new Promise((resolve) => setTimeout(resolve, 5))

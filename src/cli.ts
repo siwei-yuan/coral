@@ -23,6 +23,7 @@ const { values, positionals } = parseArgs({
 })
 const [command, source, target] = positionals
 const human = userInfo().username
+const pluginEnvironments = scopedPluginEnvironments()
 let deployment: Deployment
 
 if (command === "create" && source && target) {
@@ -32,9 +33,10 @@ if (command === "create" && source && target) {
     name: basename(snapshot),
     instanceRoot: resolve(target),
     human,
+    pluginEnvironments,
   })
 } else if (command === "start" && source && !target) {
-  deployment = await openDeployment({ instanceRoot: resolve(source), human })
+  deployment = await openDeployment({ instanceRoot: resolve(source), human, pluginEnvironments })
 } else {
   throw new Error("Usage: coral create <snapshot> <instance> | coral start <instance>")
 }
@@ -112,3 +114,25 @@ void deployment.closed.then(() => stop()).catch((error) => {
   console.error(error)
   process.exitCode = 1
 })
+
+function scopedPluginEnvironments(): Record<string, Record<string, string>> {
+  return {
+    composio: takeEnvironment([
+      "CORAL_COMPOSIO_EXECUTABLE",
+      "CORAL_COMPOSIO_TRIGGER_INGRESS",
+    ]),
+    scheduler: takeEnvironment(["CORAL_SCHEDULER_TICK_MS"]),
+    screen: takeEnvironment(["CORAL_SCREEN_DISABLED"]),
+  }
+}
+
+function takeEnvironment(keys: string[]): Record<string, string> {
+  const environment: Record<string, string> = {}
+  for (const key of keys) {
+    const value = process.env[key]
+    if (value === undefined) continue
+    environment[key] = value
+    delete process.env[key]
+  }
+  return environment
+}

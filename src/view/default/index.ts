@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http"
+import { readFile } from "node:fs/promises"
 import type { AddressInfo } from "node:net"
 import type { Swarm } from "../../core/swarm/runtime.ts"
 import type { ForkSnapshot, SwarmRevision } from "../../core/swarm/revision.ts"
@@ -64,6 +65,14 @@ export class DefaultView {
       const path = url.pathname
       const extensionRoute = extensionPath(path)
       if (request.method === "GET" && path === "/") return html(response, 200, this.render())
+      if (request.method === "GET" && path === "/_view/coral-wordmark.png") {
+        response.writeHead(200, {
+          "content-type": "image/png",
+          "cache-control": "public, max-age=3600",
+          "content-security-policy": "default-src 'none'",
+        }).end(await readFile(new URL("../../../assets/coral-wordmark.png", import.meta.url)))
+        return
+      }
       if (request.method === "GET" && path === "/_view/topology") {
         const model = this.model()
         const head = model.events.at(-1)?.seq ?? 0
